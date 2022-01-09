@@ -8,9 +8,16 @@ sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 # from models.backbone_module import Pointnet2Backbone
 # from models.voting_module import VotingModule
 from models.proposal_module import ProposalModule
-from models.tridetr.model_3detr import Model3DETR
 from models.graph_module import GraphModule
 from models.caption_module import SceneCaptionModule, TopDownSceneCaptionModule
+
+#3DETR Imports:
+from models.tridetr.model_3detr import Model3DETR
+from models.tridetr.helpers import GenericMLP
+from models.tridetr.position_embedding import PositionEmbeddingCoordsSine
+from models.tridetr.transformer import (MaskedTransformerEncoder, TransformerDecoder,
+                                TransformerDecoderLayer, TransformerEncoder,
+                                TransformerEncoderLayer)
 
 
 class CapNet(nn.Module):
@@ -129,7 +136,12 @@ class CapNet(nn.Module):
         #           DETECTION BRANCH          #
         #                                     #
         #######################################
-
+        # --------- 3DETR Fwd ---------
+        point_clouds = data_dict["point_clouds"]
+        enc_xyz, enc_features, enc_inds = self.run_encoder(point_clouds)
+        enc_features = self.encoder_to_decoder_projection(
+            enc_features.permute(1, 2, 0)
+        ).permute(2, 0, 1)
 
         """
         # --------- HOUGH VOTING ---------
@@ -170,3 +182,26 @@ class CapNet(nn.Module):
             data_dict = self.caption(data_dict, use_tf, is_eval)
 
         return data_dict
+
+    #3DETR forward pass functions
+    def run_encoder(self, point_clouds):
+        xyz, features = self._break_up_pc(point_clouds)
+        pre_enc_xyz, pre_enc_features, pre_enc_inds = self.pre_encoder(xyz, features)
+        # xyz: batch x npoints x 3
+        # features: batch x channel x npoints
+        # inds: batch x npoints
+
+        # nn.MultiHeadAttention in encoder expects npoints x batch x channel features
+        pre_enc_features = pre_enc_features.permute(2, 0, 1)
+
+        # xyz points are in batch x npointx channel order
+        enc_xyz, enc_features, enc_inds = self.encoder(
+            pre_enc_features, xyz=pre_enc_xyz
+        )
+        if enc_inds is None:
+            # encoder does not perform any downsampling
+            enc_inds = pre_enc_inds
+        else:
+            # use gather here to ensure that it works for both FPS and random sampling
+            enc_inds = torch.gather(pre_enc_inds, 1, enc_inds)
+        return enc_xyz, enc_features, enc_inds
