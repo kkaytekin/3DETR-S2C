@@ -5,9 +5,10 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
-from models.backbone_module import Pointnet2Backbone
-from models.voting_module import VotingModule
+# from models.backbone_module import Pointnet2Backbone
+# from models.voting_module import VotingModule
 from models.proposal_module import ProposalModule
+from models.tridetr.model_3detr import Model3DETR
 from models.graph_module import GraphModule
 from models.caption_module import SceneCaptionModule, TopDownSceneCaptionModule
 
@@ -18,7 +19,17 @@ class CapNet(nn.Module):
     no_caption=False, use_topdown=False, query_mode="corner", 
     graph_mode="graph_conv", num_graph_steps=0, use_relation=False, graph_aggr="add",
     use_orientation=False, num_bins=6, use_distance=False, use_new=False, 
-    emb_size=300, hidden_size=512):
+    emb_size=300, hidden_size=512,
+                 #3detr initializers:
+                 pre_encoder,
+                 encoder,
+                 decoder,
+                 dataset_config,
+                 encoder_dim=256,
+                 decoder_dim=256,
+                 position_embedding="fourier",
+                 mlp_dropout=0.3,
+                 num_queries=256,):
         super().__init__()
 
         self.num_class = num_class
@@ -33,16 +44,52 @@ class CapNet(nn.Module):
         self.no_caption = no_caption
         self.num_graph_steps = num_graph_steps
 
+        # --------- 3DETR ---------
+        self.pre_encoder = pre_encoder
+        self.encoder = encoder
+        if hasattr(self.encoder, "masking_radius"):
+            hidden_dims = [encoder_dim]
+        else:
+            hidden_dims = [encoder_dim, encoder_dim]
+        self.encoder_to_decoder_projection = GenericMLP(
+            input_dim=encoder_dim,
+            hidden_dims=hidden_dims,
+            output_dim=decoder_dim,
+            norm_fn_name="bn1d",
+            activation="relu",
+            use_conv=True,
+            output_use_activation=True,
+            output_use_norm=True,
+            output_use_bias=False,
+        )
+        self.pos_embedding = PositionEmbeddingCoordsSine(
+            d_pos=decoder_dim, pos_type=position_embedding, normalize=True
+        )
+        self.query_projection = GenericMLP(
+            input_dim=decoder_dim,
+            hidden_dims=[decoder_dim],
+            output_dim=decoder_dim,
+            use_conv=True,
+            output_use_activation=True,
+            hidden_use_bias=True,
+        )
+        self.decoder = decoder
+        self.build_mlp_heads(dataset_config, decoder_dim, mlp_dropout)
+
+        self.num_queries = num_queries
+        # TODO: Not including box_processor, use ProposalModule instead.
+        # self.box_processor = BoxProcessor(dataset_config)
+        """
         # --------- PROPOSAL GENERATION ---------
         # Backbone point feature learning
         self.backbone_net = Pointnet2Backbone(input_feature_dim=self.input_feature_dim)
-
-        # Hough voting
+        Hough voting
         self.vgen = VotingModule(self.vote_factor, 256)
-
-        # Vote aggregation and object proposal
+        
+        # Vote aggregation and """ # object proposal
+        # TODO: Add MLP after decoder into Proposal Module
         self.proposal = ProposalModule(num_class, num_heading_bin, num_size_cluster, mean_size_arr, num_proposal, sampling)
-
+        # --------- Graph Module ---------
         if use_relation: assert use_topdown # only enable use_relation in topdown captioning module
 
         if num_graph_steps > 0:
@@ -50,7 +97,7 @@ class CapNet(nn.Module):
                 query_mode, graph_mode, return_edge=use_relation, graph_aggr=graph_aggr, 
                 return_orientation=use_orientation, num_bins=num_bins, return_distance=use_distance)
 
-        # Caption generation
+        # --------- Caption generation ---------
         if not no_caption:
             if use_topdown:
                 self.caption = TopDownSceneCaptionModule(vocabulary, embeddings, emb_size, 128, 
@@ -83,6 +130,8 @@ class CapNet(nn.Module):
         #                                     #
         #######################################
 
+
+        """
         # --------- HOUGH VOTING ---------
         data_dict = self.backbone_net(data_dict)
                 
@@ -98,7 +147,7 @@ class CapNet(nn.Module):
         features = features.div(features_norm.unsqueeze(1))
         data_dict["vote_xyz"] = xyz
         data_dict["vote_features"] = features
-
+        """
         # --------- PROPOSAL GENERATION ---------
         data_dict = self.proposal(xyz, features, data_dict)
 

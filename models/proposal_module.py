@@ -29,29 +29,30 @@ class ProposalModule(nn.Module):
         self.num_proposal = num_proposal
         self.sampling = sampling
         self.seed_feat_dim = seed_feat_dim
-
+        # TODO: Push decoder output as input
         # Vote clustering
-        self.vote_aggregation = PointnetSAModuleVotes( 
-            npoint=self.num_proposal,
-            radius=0.3,
-            nsample=16,
-            mlp=[self.seed_feat_dim, 128, 128, 128],
-            use_xyz=True,
-            normalize_xyz=True
-        )
-            
-        # Object proposal/detection
-        # Objectness scores (2), center residual (3),
-        # heading class+residual (num_heading_bin*2), size class+residual(num_size_cluster*4)
-        self.proposal = nn.Sequential(
-            nn.Conv1d(128,128,1, bias=False),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Conv1d(128,128,1, bias=False),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Conv1d(128,2+3+num_heading_bin*2+num_size_cluster*4+self.num_class,1)
-        )
+        # self.vote_aggregation = PointnetSAModuleVotes(
+        #     npoint=self.num_proposal,
+        #     radius=0.3,
+        #     nsample=16,
+        #     mlp=[self.seed_feat_dim, 128, 128, 128],
+        #     use_xyz=True,
+        #     normalize_xyz=True
+        # )
+        #
+        # # Object proposal/detection
+        # # Objectness scores (2), center residual (3),
+        # # heading class+residual (num_heading_bin*2), size class+residual(num_size_cluster*4)
+        # self.proposal = nn.Sequential(
+        #     nn.Conv1d(128,128,1, bias=False),
+        #     nn.BatchNorm1d(128),
+        #     nn.ReLU(),
+        #     nn.Conv1d(128,128,1, bias=False),
+        #     nn.BatchNorm1d(128),
+        #     nn.ReLU(),
+        #    TODO: Decoder output should look like here:
+        #     nn.Conv1d(128,2+3+num_heading_bin*2+num_size_cluster*4+self.num_class,1)
+        # )
 
     def forward(self, xyz, features, data_dict):
         """
@@ -63,16 +64,16 @@ class ProposalModule(nn.Module):
         """
 
         # Farthest point sampling (FPS) on votes
-        xyz, features, fps_inds = self.vote_aggregation(xyz, features)
+        # xyz, features, fps_inds = self.vote_aggregation(xyz, features)
 
-        sample_inds = fps_inds
+        # sample_inds = fps_inds
 
-        data_dict['aggregated_vote_xyz'] = xyz # (batch_size, num_proposal, 3)
-        data_dict['aggregated_vote_features'] = features.permute(0, 2, 1).contiguous() # (batch_size, num_proposal, 128)
-        data_dict['aggregated_vote_inds'] = sample_inds # (batch_size, num_proposal,) # should be 0,1,2,...,num_proposal
+        #data_dict['aggregated_vote_xyz'] = xyz # (batch_size, num_proposal, 3)
+        #data_dict['aggregated_vote_features'] = features.permute(0, 2, 1).contiguous() # (batch_size, num_proposal, 128)
+        #data_dict['aggregated_vote_inds'] = sample_inds # (batch_size, num_proposal,) # should be 0,1,2,...,num_proposal
 
         # --------- PROPOSAL GENERATION ---------
-        net = self.proposal(features)
+        net = self.proposal(features) # TODO: This will be the MLP after decoder
         data_dict = self.decode_scores(net, data_dict, self.num_class, self.num_heading_bin, self.num_size_cluster, self.mean_size_arr)
 
         return data_dict
