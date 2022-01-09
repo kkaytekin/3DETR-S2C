@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-from .model_3detr import build_3detr
+from tridetr.models.model_3detr import build_3detr
 
 MODEL_FUNCS = {
     "3detr": build_3detr,

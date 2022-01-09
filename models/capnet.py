@@ -12,12 +12,12 @@ from models.graph_module import GraphModule
 from models.caption_module import SceneCaptionModule, TopDownSceneCaptionModule
 
 #3DETR Imports:
-from models.tridetr.model_3detr import Model3DETR
-from models.tridetr.helpers import GenericMLP
-from models.tridetr.position_embedding import PositionEmbeddingCoordsSine
-from models.tridetr.transformer import (MaskedTransformerEncoder, TransformerDecoder,
-                                TransformerDecoderLayer, TransformerEncoder,
-                                TransformerEncoderLayer)
+from tridetr.models.model_3detr import (build_preencoder,build_encoder,build_decoder)
+from tridetr.models.helpers import GenericMLP
+from tridetr.models.position_embedding import PositionEmbeddingCoordsSine
+from tridetr.models.transformer import (MaskedTransformerEncoder, TransformerDecoder,
+                                        TransformerDecoderLayer, TransformerEncoder,
+                                        TransformerEncoderLayer)
 
 
 class CapNet(nn.Module):

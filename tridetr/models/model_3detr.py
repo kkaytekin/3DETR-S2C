@@ -7,13 +7,13 @@ import torch
 import torch.nn as nn
 from lib.pointnet2.pointnet2_modules import PointnetSAModuleVotes
 from lib.pointnet2.pointnet2_utils import furthest_point_sample
-from models.tridetr.utils.pc_util import scale_points, shift_scale_points
+from tridetr.utils.pc_util import scale_points, shift_scale_points
 
-from models.tridetr.helpers import GenericMLP
-from models.tridetr.position_embedding import PositionEmbeddingCoordsSine
-from models.tridetr.transformer import (MaskedTransformerEncoder, TransformerDecoder,
-                                TransformerDecoderLayer, TransformerEncoder,
-                                TransformerEncoderLayer)
+from tridetr.models.helpers import GenericMLP
+from tridetr.models.position_embedding import PositionEmbeddingCoordsSine
+from tridetr.models.transformer import (MaskedTransformerEncoder, TransformerDecoder,
+                                        TransformerDecoderLayer, TransformerEncoder,
+                                        TransformerEncoderLayer)
 
 
 class BoxProcessor(object):
