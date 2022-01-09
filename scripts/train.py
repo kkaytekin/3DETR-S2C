@@ -305,6 +305,7 @@ def train(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # --------- Scan2Cap Arguments ---------
     parser.add_argument("--tag", type=str, help="tag for the training, e.g. cuda_wl", default="")
     parser.add_argument("--dataset", type=str, help="Choose a dataset: ScanRefer or ReferIt3D", default="ScanRefer")
     parser.add_argument("--gpu", type=str, help="gpu", default="0")
@@ -348,6 +349,12 @@ if __name__ == "__main__":
     parser.add_argument("--use_checkpoint", type=str, help="Specify the checkpoint root", default="")
     
     parser.add_argument("--debug", action="store_true", help="Debug mode.")
+    # --------- 3DETR Arguments ---------
+    # TODO: Determine what to parse,
+    #   *which ones affect datalooader & preprocessing,
+    #   *which ones affect the rest?
+
+
     args = parser.parse_args()
 
     # setting

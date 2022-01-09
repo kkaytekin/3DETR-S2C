@@ -21,17 +21,19 @@ from models.tridetr.transformer import (MaskedTransformerEncoder, TransformerDec
 
 
 class CapNet(nn.Module):
-    def __init__(self, num_class, vocabulary, embeddings, num_heading_bin, num_size_cluster, mean_size_arr, 
-    input_feature_dim=0, num_proposal=256, num_locals=-1, vote_factor=1, sampling="vote_fps",
-    no_caption=False, use_topdown=False, query_mode="corner", 
-    graph_mode="graph_conv", num_graph_steps=0, use_relation=False, graph_aggr="add",
-    use_orientation=False, num_bins=6, use_distance=False, use_new=False, 
-    emb_size=300, hidden_size=512,
-                 #3detr initializers:
-                 pre_encoder,
-                 encoder,
-                 decoder,
-                 dataset_config,
+    def __init__(self, num_class, vocabulary, embeddings, num_heading_bin,
+                 num_size_cluster, mean_size_arr,
+                 #3detr non-defaults
+                 pre_encoder,encoder,decoder,dataset_config,
+                 #CapNet defaults
+                 input_feature_dim=0, num_proposal=256, num_locals=-1,
+                 vote_factor=1, sampling="vote_fps",no_caption=False,
+                 use_topdown=False, query_mode="corner",
+                 graph_mode="graph_conv", num_graph_steps=0,
+                 use_relation=False, graph_aggr="add",
+                 use_orientation=False, num_bins=6, use_distance=False, use_new=False,
+                 emb_size=300, hidden_size=512,
+                 #3detr defaults:
                  encoder_dim=256,
                  decoder_dim=256,
                  position_embedding="fourier",
@@ -112,21 +114,24 @@ class CapNet(nn.Module):
             else:
                 self.caption = SceneCaptionModule(vocabulary, embeddings, emb_size, 128, hidden_size, num_proposal)
 
-    def forward(self, data_dict, use_tf=True, is_eval=False):
+    def forward(self, data_dict, use_tf=True, is_eval=False,
+                #argument for 3detr
+                encoder_only=False):
         """ Forward pass of the network
 
         Args:
             data_dict: dict
                 {
                     point_clouds, 
-                    lang_feat
+                    lang_feat,
+
                 }
 
                 point_clouds: Variable(torch.cuda.FloatTensor)
                     (B, N, 3 + input_channels) tensor
                     Point cloud to run predicts on
                     Each point in the point-cloud MUST
-                    be formated as (x, y, z, features...)
+                    be formatted as (x, y, z, features...)
         Returns:
             end_points: dict
         """
@@ -142,6 +147,42 @@ class CapNet(nn.Module):
         enc_features = self.encoder_to_decoder_projection(
             enc_features.permute(1, 2, 0)
         ).permute(2, 0, 1)
+        # encoder features: npoints x batch x channel
+        # encoder xyz: npoints x batch x 3
+
+        if encoder_only:
+            # return: batch x npoints x channels
+            return enc_xyz, enc_features.transpose(0, 1)
+        # TODO: Either put these hyperparameters into data_dict as initial input,
+        #  set them within fwd pass, or handle them within get_query_embeddings().
+        #  I checked if its possible to pass them into parser; but they are calculated
+        #  within dataloader. So either modify current dataloader to have them within
+        #  data_dict, or calculate them during fwd. pass. There might be some related
+        #  arguments at parser. Check them and implement them jointly.
+        point_cloud_dims = [
+            data_dict["point_cloud_dims_min"],
+            data_dict["point_cloud_dims_max"],
+        ]
+        # TODO: Pass enhanced data_dict instead of point_cloud_dims into following function
+        query_xyz, query_embed = self.get_query_embeddings(enc_xyz, point_cloud_dims)
+        # query_embed: batch x channel x npoint
+        enc_pos = self.pos_embedding(enc_xyz, input_range=point_cloud_dims)
+
+        # decoder expects: npoints x batch x channel
+        enc_pos = enc_pos.permute(2, 0, 1)
+        query_embed = query_embed.permute(2, 0, 1)
+        tgt = torch.zeros_like(query_embed)
+        box_features = self.decoder(
+            tgt, enc_features, query_pos=query_embed, pos=enc_pos)[0]
+        # TODO: Handle the following within proposal module.
+        """
+        Besides the following, lines, self.get_box_predictions() 
+        method of 3DETR class should be put into proposal module.
+        box_predictions = self.get_box_predictions(
+            query_xyz, point_cloud_dims, box_features
+        )
+        return box_predictions
+        """
 
         """
         # --------- HOUGH VOTING ---------
@@ -161,8 +202,8 @@ class CapNet(nn.Module):
         data_dict["vote_features"] = features
         """
         # --------- PROPOSAL GENERATION ---------
-        data_dict = self.proposal(xyz, features, data_dict)
-
+        #data_dict = self.proposal(xyz, features, data_dict)
+        data_dict = self.proposal(query_xyz, box_features, data_dict)
         #######################################
         #                                     #
         #           GRAPH ENHANCEMENT         #
@@ -205,3 +246,18 @@ class CapNet(nn.Module):
             # use gather here to ensure that it works for both FPS and random sampling
             enc_inds = torch.gather(pre_enc_inds, 1, enc_inds)
         return enc_xyz, enc_features, enc_inds
+
+    def get_query_embeddings(self, encoder_xyz, point_cloud_dims):
+        query_inds = furthest_point_sample(encoder_xyz, self.num_queries)
+        query_inds = query_inds.long()
+        query_xyz = [torch.gather(encoder_xyz[..., x], 1, query_inds) for x in range(3)]
+        query_xyz = torch.stack(query_xyz)
+        query_xyz = query_xyz.permute(1, 2, 0)
+
+        # Gater op above can be replaced by the three lines below from the pointnet2 codebase
+        # xyz_flipped = encoder_xyz.transpose(1, 2).contiguous()
+        # query_xyz = gather_operation(xyz_flipped, query_inds.int())
+        # query_xyz = query_xyz.transpose(1, 2)
+        pos_embed = self.pos_embedding(query_xyz, input_range=point_cloud_dims)
+        query_embed = self.query_projection(pos_embed)
+        return query_xyz, query_embed
