@@ -24,7 +24,7 @@ class CapNet(nn.Module):
     def __init__(self, num_class, vocabulary, embeddings, num_heading_bin,
                  num_size_cluster, mean_size_arr,
                  #3detr non-defaults
-                 pre_encoder,encoder,decoder,dataset_config,
+                 tridetrmodel,
                  #CapNet defaults
                  input_feature_dim=0, num_proposal=256, num_locals=-1,
                  vote_factor=1, sampling="vote_fps",no_caption=False,
@@ -32,13 +32,7 @@ class CapNet(nn.Module):
                  graph_mode="graph_conv", num_graph_steps=0,
                  use_relation=False, graph_aggr="add",
                  use_orientation=False, num_bins=6, use_distance=False, use_new=False,
-                 emb_size=300, hidden_size=512,
-                 #3detr defaults:
-                 encoder_dim=256,
-                 decoder_dim=256,
-                 position_embedding="fourier",
-                 mlp_dropout=0.3,
-                 num_queries=256,):
+                 emb_size=300, hidden_size=512,):
         super().__init__()
 
         self.num_class = num_class
@@ -52,51 +46,15 @@ class CapNet(nn.Module):
         self.sampling = sampling
         self.no_caption = no_caption
         self.num_graph_steps = num_graph_steps
-
-        # --------- 3DETR ---------
-        self.pre_encoder = pre_encoder
-        self.encoder = encoder
-        if hasattr(self.encoder, "masking_radius"):
-            hidden_dims = [encoder_dim]
-        else:
-            hidden_dims = [encoder_dim, encoder_dim]
-        self.encoder_to_decoder_projection = GenericMLP(
-            input_dim=encoder_dim,
-            hidden_dims=hidden_dims,
-            output_dim=decoder_dim,
-            norm_fn_name="bn1d",
-            activation="relu",
-            use_conv=True,
-            output_use_activation=True,
-            output_use_norm=True,
-            output_use_bias=False,
-        )
-        self.pos_embedding = PositionEmbeddingCoordsSine(
-            d_pos=decoder_dim, pos_type=position_embedding, normalize=True
-        )
-        self.query_projection = GenericMLP(
-            input_dim=decoder_dim,
-            hidden_dims=[decoder_dim],
-            output_dim=decoder_dim,
-            use_conv=True,
-            output_use_activation=True,
-            hidden_use_bias=True,
-        )
-        self.decoder = decoder
-        self.build_mlp_heads(dataset_config, decoder_dim, mlp_dropout)
-
-        self.num_queries = num_queries
-        # TODO: Not including box_processor, use ProposalModule instead.
-        # self.box_processor = BoxProcessor(dataset_config)
-        """
         # --------- PROPOSAL GENERATION ---------
+        """
         # Backbone point feature learning
         self.backbone_net = Pointnet2Backbone(input_feature_dim=self.input_feature_dim)
         Hough voting
         self.vgen = VotingModule(self.vote_factor, 256)
         
-        # Vote aggregation and """ # object proposal
-        # TODO: Add MLP after decoder into Proposal Module
+        # Vote aggregation and object proposal"""
+        self.tridetr = tridetrmodel
         self.proposal = ProposalModule(num_class, num_heading_bin, num_size_cluster, mean_size_arr, num_proposal, sampling)
         # --------- Graph Module ---------
         if use_relation: assert use_topdown # only enable use_relation in topdown captioning module
@@ -124,7 +82,6 @@ class CapNet(nn.Module):
                 {
                     point_clouds, 
                     lang_feat,
-
                 }
 
                 point_clouds: Variable(torch.cuda.FloatTensor)
@@ -141,49 +98,6 @@ class CapNet(nn.Module):
         #           DETECTION BRANCH          #
         #                                     #
         #######################################
-        # --------- 3DETR Fwd ---------
-        point_clouds = data_dict["point_clouds"]
-        enc_xyz, enc_features, enc_inds = self.run_encoder(point_clouds)
-        enc_features = self.encoder_to_decoder_projection(
-            enc_features.permute(1, 2, 0)
-        ).permute(2, 0, 1)
-        # encoder features: npoints x batch x channel
-        # encoder xyz: npoints x batch x 3
-
-        if encoder_only:
-            # return: batch x npoints x channels
-            return enc_xyz, enc_features.transpose(0, 1)
-        # TODO: Either put these hyperparameters into data_dict as initial input,
-        #  set them within fwd pass, or handle them within get_query_embeddings().
-        #  I checked if its possible to pass them into parser; but they are calculated
-        #  within dataloader. So either modify current dataloader to have them within
-        #  data_dict, or calculate them during fwd. pass. There might be some related
-        #  arguments at parser. Check them and implement them jointly.
-        point_cloud_dims = [
-            data_dict["point_cloud_dims_min"],
-            data_dict["point_cloud_dims_max"],
-        ]
-        # TODO: Pass enhanced data_dict instead of point_cloud_dims into following function
-        query_xyz, query_embed = self.get_query_embeddings(enc_xyz, point_cloud_dims)
-        # query_embed: batch x channel x npoint
-        enc_pos = self.pos_embedding(enc_xyz, input_range=point_cloud_dims)
-
-        # decoder expects: npoints x batch x channel
-        enc_pos = enc_pos.permute(2, 0, 1)
-        query_embed = query_embed.permute(2, 0, 1)
-        tgt = torch.zeros_like(query_embed)
-        box_features = self.decoder(
-            tgt, enc_features, query_pos=query_embed, pos=enc_pos)[0]
-        # TODO: Handle the following within proposal module.
-        """
-        Besides the following, lines, self.get_box_predictions() 
-        method of 3DETR class should be put into proposal module.
-        box_predictions = self.get_box_predictions(
-            query_xyz, point_cloud_dims, box_features
-        )
-        return box_predictions
-        """
-
         """
         # --------- HOUGH VOTING ---------
         data_dict = self.backbone_net(data_dict)
@@ -202,8 +116,10 @@ class CapNet(nn.Module):
         data_dict["vote_features"] = features
         """
         # --------- PROPOSAL GENERATION ---------
+        # TODO: Debug here to see if the xyz
+        xyz, features = self.tridetr(data_dict,encoder_only)
         #data_dict = self.proposal(xyz, features, data_dict)
-        data_dict = self.proposal(query_xyz, box_features, data_dict)
+        data_dict = self.proposal(xyz, features, data_dict)
         #######################################
         #                                     #
         #           GRAPH ENHANCEMENT         #

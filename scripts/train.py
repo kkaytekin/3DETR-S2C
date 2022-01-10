@@ -56,14 +56,17 @@ def get_dataloader(args, scanrefer, all_scene_list, split, config, augment, scan
 def get_model(args, dataset, device):
     # initiate model
     input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
+    tridetr , _ = build_3detr(args, dataset_config=DC)
     model = CapNet(
-        dataset_config=DC
         num_class=DC.num_class,
         vocabulary=dataset.vocabulary,
         embeddings=dataset.glove,
         num_heading_bin=DC.num_heading_bin,
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
+
+        tridetrmodel=tridetr,
+
         input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
         no_caption=args.no_caption,

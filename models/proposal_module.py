@@ -29,7 +29,6 @@ class ProposalModule(nn.Module):
         self.num_proposal = num_proposal
         self.sampling = sampling
         self.seed_feat_dim = seed_feat_dim
-        # TODO: Push decoder output as input
         # Vote clustering
         # self.vote_aggregation = PointnetSAModuleVotes(
         #     npoint=self.num_proposal,
@@ -50,15 +49,25 @@ class ProposalModule(nn.Module):
         #     nn.Conv1d(128,128,1, bias=False),
         #     nn.BatchNorm1d(128),
         #     nn.ReLU(),
-        #    TODO: Decoder output should look like here:
-        #     nn.Conv1d(128,2+3+num_heading_bin*2+num_size_cluster*4+self.num_class,1)
         # )
+        self.proposal = nn.Sequential(
+            nn.Conv1d(256,128,1, bias=False),   # This is the only difference, changed in_channel to 256
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Conv1d(128,128,1, bias=False),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Conv1d(128,2+3+num_heading_bin*2+num_size_cluster*4+self.num_class,1)
+        )
 
     def forward(self, xyz, features, data_dict):
         """
-        Args:
+        Old Args:
             xyz: (B,K,3)
             features: (B,C,K)
+        New Args:
+            xyz: query_xyz
+            features: box_features --> This is the important part. It should take part in calculations.
         Returns:
             scores: (B,num_proposal,2+3+NH*2+NS*4) 
         """
@@ -73,7 +82,7 @@ class ProposalModule(nn.Module):
         #data_dict['aggregated_vote_inds'] = sample_inds # (batch_size, num_proposal,) # should be 0,1,2,...,num_proposal
 
         # --------- PROPOSAL GENERATION ---------
-        net = self.proposal(features) # TODO: This will be the MLP after decoder
+        net = self.proposal(features)
         data_dict = self.decode_scores(net, data_dict, self.num_class, self.num_heading_bin, self.num_size_cluster, self.mean_size_arr)
 
         return data_dict

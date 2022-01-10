@@ -128,10 +128,12 @@ class Model3DETR(nn.Module):
             hidden_use_bias=True,
         )
         self.decoder = decoder
-        self.build_mlp_heads(dataset_config, decoder_dim, mlp_dropout)
+        # TODO: Not building mlp heads, will use ProposalModule feed forward
+        #self.build_mlp_heads(dataset_config, decoder_dim, mlp_dropout)
 
         self.num_queries = num_queries
-        self.box_processor = BoxProcessor(dataset_config)
+        # TODO: Not including box_processor, use ProposalModule instead.
+        # self.box_processor = BoxProcessor(dataset_config)
 
     def build_mlp_heads(self, dataset_config, decoder_dim, mlp_dropout):
         mlp_func = partial(
@@ -304,6 +306,7 @@ class Model3DETR(nn.Module):
         }
 
     def forward(self, inputs, encoder_only=False):
+        #push inputs = data_dict in the call
         point_clouds = inputs["point_clouds"]
 
         enc_xyz, enc_features, enc_inds = self.run_encoder(point_clouds)
@@ -316,7 +319,12 @@ class Model3DETR(nn.Module):
         if encoder_only:
             # return: batch x npoints x channels
             return enc_xyz, enc_features.transpose(0, 1)
-
+        # TODO: Either put these hyperparameters into data_dict as initial input,
+        #  set them within fwd pass, or handle them within get_query_embeddings().
+        #  I checked if its possible to pass them into parser; but they are calculated
+        #  data_dict, or calculate them during fwd. pass. There might be some related
+        #  within dataloader. So either modify current dataloader to have them within
+        #  arguments at parser. Check them and implement them jointly.
         point_cloud_dims = [
             inputs["point_cloud_dims_min"],
             inputs["point_cloud_dims_max"],
@@ -332,12 +340,12 @@ class Model3DETR(nn.Module):
         box_features = self.decoder(
             tgt, enc_features, query_pos=query_embed, pos=enc_pos
         )[0]
-
-        box_predictions = self.get_box_predictions(
-            query_xyz, point_cloud_dims, box_features
-        )
-        return box_predictions
-
+        # TODO: Handle the following within proposal module.
+        # box_predictions = self.get_box_predictions(
+        #     query_xyz, point_cloud_dims, box_features
+        # )
+        #return box_predictions
+        return query_xyz, box_features
 
 def build_preencoder(args):
     mlp_dims = [3 * int(args.use_color), 64, 128, args.enc_dim]
