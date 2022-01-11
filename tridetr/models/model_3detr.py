@@ -95,7 +95,7 @@ class Model3DETR(nn.Module):
         encoder_dim=256,
         decoder_dim=256,
         position_embedding="fourier",
-        mlp_dropout=0.3,
+        #mlp_dropout=0.3,
         num_queries=256,
     ):
         super().__init__()
@@ -325,6 +325,7 @@ class Model3DETR(nn.Module):
         #  data_dict, or calculate them during fwd. pass. There might be some related
         #  within dataloader. So either modify current dataloader to have them within
         #  arguments at parser. Check them and implement them jointly.
+
         point_cloud_dims = [
             inputs["point_cloud_dims_min"],
             inputs["point_cloud_dims_max"],
@@ -423,7 +424,7 @@ def build_3detr(args, dataset_config):
         dataset_config,
         encoder_dim=args.enc_dim,
         decoder_dim=args.dec_dim,
-        mlp_dropout=args.mlp_dropout,
+        #mlp_dropout=args.mlp_dropout,
         num_queries=args.nqueries,
     )
     output_processor = BoxProcessor(dataset_config)

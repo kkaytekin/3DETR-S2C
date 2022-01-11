@@ -83,44 +83,44 @@ def get_model(args, dataset, device):
     )
 
     # load pretrained model
-    print("loading pretrained VoteNet...")
-    pretrained_model = CapNet(
-        num_class=DC.num_class,
-        vocabulary=dataset.vocabulary,
-        embeddings=dataset.glove,
-        num_heading_bin=DC.num_heading_bin,
-        num_size_cluster=DC.num_size_cluster,
-        mean_size_arr=DC.mean_size_arr,
-        num_proposal=args.num_proposals,
-        input_feature_dim=input_channels,
-        no_caption=True
-    )
-
-    pretrained_name = "PRETRAIN_VOTENET_XYZ"
-    if args.use_color: pretrained_name += "_COLOR"
-    if args.use_multiview: pretrained_name += "_MULTIVIEW"
-    if args.use_normal: pretrained_name += "_NORMAL"
-
-    pretrained_path = os.path.join(CONF.PATH.PRETRAINED, pretrained_name, "model.pth")
-    pretrained_model.load_state_dict(torch.load(pretrained_path), strict=False)
-
-    # mount
-    model.backbone_net = pretrained_model.backbone_net
-    model.vgen = pretrained_model.vgen
-    model.proposal = pretrained_model.proposal
-
-    if args.no_detection:
-        # freeze pointnet++ backbone
-        for param in model.backbone_net.parameters():
-            param.requires_grad = False
-
-        # freeze voting
-        for param in model.vgen.parameters():
-            param.requires_grad = False
-        
-        # freeze detector
-        for param in model.proposal.parameters():
-            param.requires_grad = False
+    # print("loading pretrained VoteNet...")
+    # pretrained_model = CapNet(
+    #     num_class=DC.num_class,
+    #     vocabulary=dataset.vocabulary,
+    #     embeddings=dataset.glove,
+    #     num_heading_bin=DC.num_heading_bin,
+    #     num_size_cluster=DC.num_size_cluster,
+    #     mean_size_arr=DC.mean_size_arr,
+    #     num_proposal=args.num_proposals,
+    #     input_feature_dim=input_channels,
+    #     no_caption=True
+    # )
+    #
+    # pretrained_name = "PRETRAIN_VOTENET_XYZ"
+    # if args.use_color: pretrained_name += "_COLOR"
+    # if args.use_multiview: pretrained_name += "_MULTIVIEW"
+    # if args.use_normal: pretrained_name += "_NORMAL"
+    #
+    # pretrained_path = os.path.join(CONF.PATH.PRETRAINED, pretrained_name, "model.pth")
+    # pretrained_model.load_state_dict(torch.load(pretrained_path), strict=False)
+    #
+    # # mount
+    # model.backbone_net = pretrained_model.backbone_net
+    # model.vgen = pretrained_model.vgen
+    # model.proposal = pretrained_model.proposal
+    #
+    # if args.no_detection:
+    #     # freeze pointnet++ backbone
+    #     for param in model.backbone_net.parameters():
+    #         param.requires_grad = False
+    #
+    #     # freeze voting
+    #     for param in model.vgen.parameters():
+    #         param.requires_grad = False
+    #
+    #     # freeze detector
+    #     for param in model.proposal.parameters():
+    #         param.requires_grad = False
     
     # to device
     model.to(device)
@@ -358,7 +358,42 @@ if __name__ == "__main__":
     # TODO: Determine what to parse,
     #   *which ones affect datalooader & preprocessing,
     #   *which ones affect the rest?
+    ### Encoder
+    parser.add_argument(
+        "--enc_type", default="vanilla", choices=["masked", "maskedv2", "vanilla"]
+    )
+    # Below options are only valid for vanilla encoder
+    parser.add_argument("--enc_nlayers", default=3, type=int)
+    parser.add_argument("--enc_dim", default=256, type=int)
+    parser.add_argument("--enc_ffn_dim", default=128, type=int)
+    parser.add_argument("--enc_dropout", default=0.1, type=float)
+    parser.add_argument("--enc_nhead", default=4, type=int)
+    parser.add_argument("--enc_pos_embed", default=None, type=str)
+    parser.add_argument("--enc_activation", default="relu", type=str)
 
+    ### Decoder
+    parser.add_argument("--dec_nlayers", default=8, type=int)
+    parser.add_argument("--dec_dim", default=256, type=int)
+    parser.add_argument("--dec_ffn_dim", default=256, type=int)
+    parser.add_argument("--dec_dropout", default=0.1, type=float)
+    parser.add_argument("--dec_nhead", default=4, type=int)
+
+    # ### MLP heads for predicting bounding boxes
+    # parser.add_argument("--mlp_dropout", default=0.3, type=float)
+    # parser.add_argument(
+    #     "--nsemcls",
+    #     default=-1,
+    #     type=int,
+    #     help="Number of semantic object classes. Can be inferred from dataset",
+    # )
+
+    ### Other model params
+    parser.add_argument("--preenc_npoints", default=2048, type=int)
+    parser.add_argument(
+        "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
+    )
+    parser.add_argument("--nqueries", default=256, type=int)
+    #parser.add_argument("--use_color", default=False, action="store_true")
 
     args = parser.parse_args()
 

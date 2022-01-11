@@ -81,10 +81,30 @@ class ProposalModule(nn.Module):
         #data_dict['aggregated_vote_features'] = features.permute(0, 2, 1).contiguous() # (batch_size, num_proposal, 128)
         #data_dict['aggregated_vote_inds'] = sample_inds # (batch_size, num_proposal,) # should be 0,1,2,...,num_proposal
 
-        # --------- PROPOSAL GENERATION ---------
-        net = self.proposal(features)
-        data_dict = self.decode_scores(net, data_dict, self.num_class, self.num_heading_bin, self.num_size_cluster, self.mean_size_arr)
+        # ----- about input dims -----
+        # box_features: num_layers x num_queries x batch x channel
 
+        # box_features change to (num_layers x batch) x channel x num_queries
+        # TODO: would hardly converge. do it like in 3detr
+        features = features.permute(0, 2, 3, 1)
+        num_layers, batch, channel, num_proposal = (
+            features.shape[0],
+            features.shape[1],
+            features.shape[2],
+            features.shape[3],
+        )
+        features = features.reshape(num_layers * batch, channel, num_proposal)
+        # --------- PROPOSAL GENERATION ---------
+        # mlp outputs: ( (num_layers * batch), 2+3+NH*2+NS*4, num_outputs )
+        net = self.proposal(features)
+        net = net.reshape(num_layers , batch, channel, -1)
+        for i in range(num_layers):
+            data_dict["decoder{}_proposal".format(i)] = self.decode_scores(net[i,...].reshape(batch,channel,num_proposal),
+                                                                           data_dict,
+                                                                           self.num_class,
+                                                                           self.num_heading_bin,
+                                                                           self.num_size_cluster,
+                                                                           self.mean_size_arr)
         return data_dict
 
     def decode_pred_box(self, data_dict):
@@ -117,13 +137,14 @@ class ProposalModule(nn.Module):
         decode the predicted parameters for the bounding boxes
 
         """
-        net_transposed = net.transpose(2,1).contiguous() # (batch_size, 1024, ..)
+        net_transposed = net.transpose(1,2).contiguous() # (batch_size, 1024, ..)
         batch_size = net_transposed.shape[0]
         num_proposal = net_transposed.shape[1]
 
         objectness_scores = net_transposed[:,:,0:2]
 
         base_xyz = data_dict['aggregated_vote_xyz'] # (batch_size, num_proposal, 3)
+        # base_xyz = query_xyz ???
         center = base_xyz + net_transposed[:,:,2:5] # (batch_size, num_proposal, 3)
 
         heading_scores = net_transposed[:,:,5:5+num_heading_bin]

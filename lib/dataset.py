@@ -500,6 +500,10 @@ class ScannetReferenceDataset(ReferenceDataset):
                 except KeyError:
                     pass
 
+        # ------------------------------- 3DETR additions ------------------------------
+        point_cloud_dims_min = point_cloud[:,0:3].min(axis=0)
+        point_cloud_dims_max = point_cloud[:,0:3].max(axis=0)
+
         data_dict = {}
         data_dict["point_clouds"] = point_cloud.astype(np.float32) # point cloud data including features
         data_dict["lang_feat"] = lang_feat.astype(np.float32) # language feature vectors
@@ -536,7 +540,8 @@ class ScannetReferenceDataset(ReferenceDataset):
         data_dict["unique_multiple"] = np.array(self.unique_multiple_lookup[scene_id][str(object_id)][ann_id]).astype(np.int64)
         data_dict["pcl_color"] = pcl_color
         data_dict["load_time"] = time.time() - start
-
+        data_dict["point_cloud_dims_min"] = point_cloud_dims_min.astype(np.float32)
+        data_dict["point_cloud_dims_max"] = point_cloud_dims_max.astype(np.float32)
         return data_dict
 
 class ScannetReferenceTestDataset():

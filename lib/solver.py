@@ -378,7 +378,7 @@ class Solver():
             for data_dict in dataloader:
                 # move to cuda
                 for key in data_dict:
-                    # data_dict[key] = data_dict[key].cuda()
+                    #data_dict[key] = data_dict[key].cuda()
                     data_dict[key] = data_dict[key].to(self.device)
 
                 # initialize the running loss

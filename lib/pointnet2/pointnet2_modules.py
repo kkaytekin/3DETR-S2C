@@ -204,7 +204,7 @@ class PointnetSAModuleVotes(nn.Module):
         mlp_spec = mlp
         if use_xyz and len(mlp_spec)>0:
             mlp_spec[0] += 3
-        self.mlp_module = pt_utils.SharedMLP(mlp_spec, bn=bn)
+        self.mlp_module = pt_utils.SharedMLP(mlp_spec, bn=bn) # DEBUGME!
 
 
     def forward(self, xyz: torch.Tensor,
@@ -249,7 +249,7 @@ class PointnetSAModuleVotes(nn.Module):
             )  # (B, C, npoint, nsample), (B,3,npoint,nsample), (B,npoint)
 
         new_features = self.mlp_module(
-            grouped_features
+            grouped_xyz
         )  # (B, mlp[-1], npoint, nsample)
         if self.pooling == 'max':
             new_features = F.max_pool2d(
