@@ -6,7 +6,7 @@ CONF = EasyDict()
 
 # path
 CONF.PATH = EasyDict()
-CONF.PATH.BASE = "/rhome/dchen/Scan2CapRelease/" # TODO: change this
+CONF.PATH.BASE = "/home/kagan/adl4cv/scan2cap-with-transformers/" # DONE: change this
 CONF.PATH.CLUSTER = "/cluster/balrog/dchen/Scan2CapRelease/" # TODO: change this
 CONF.PATH.DATA = os.path.join(CONF.PATH.BASE, "data")
 CONF.PATH.SCANNET = os.path.join(CONF.PATH.DATA, "scannet")

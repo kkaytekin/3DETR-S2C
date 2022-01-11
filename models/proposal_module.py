@@ -51,7 +51,7 @@ class ProposalModule(nn.Module):
         #     nn.ReLU(),
         # )
         self.proposal = nn.Sequential(
-            nn.Conv1d(256,128,1, bias=False),   # This is the only difference, changed in_channel to 256
+            nn.Conv1d(256,128,1, bias=False),   # This is the only difference, changed in_channel to 256 # TODO: Understand relationship with num_proposal
             nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.Conv1d(128,128,1, bias=False),

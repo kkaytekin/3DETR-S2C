@@ -23,7 +23,7 @@ void gather_points_kernel_wrapper(int b, int c, int n, int npoints,
                                   const float *points, const int *idx,
                                   float *out) {
   gather_points_kernel<<<dim3(b, c, 1), opt_n_threads(npoints), 0,
-                         at::cuda::getCurrentCUDAStream()>>>(b, c, n, npoints,
+                         at::cuda::getCurrentCUDAStream().stream()>>>(b, c, n, npoints,
                                                              points, idx, out);
 
   CUDA_CHECK_ERRORS();
@@ -50,7 +50,7 @@ void gather_points_grad_kernel_wrapper(int b, int c, int n, int npoints,
                                        const float *grad_out, const int *idx,
                                        float *grad_points) {
   gather_points_grad_kernel<<<dim3(b, c, 1), opt_n_threads(npoints), 0,
-                              at::cuda::getCurrentCUDAStream()>>>(
+                              at::cuda::getCurrentCUDAStream().stream()>>>(
       b, c, n, npoints, grad_out, idx, grad_points);
 
   CUDA_CHECK_ERRORS();
@@ -177,7 +177,7 @@ void furthest_point_sampling_kernel_wrapper(int b, int n, int m,
                                             int *idxs) {
   unsigned int n_threads = opt_n_threads(n);
 
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
 
   switch (n_threads) {
     case 512:

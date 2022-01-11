@@ -24,6 +24,7 @@ from lib.solver import Solver
 from lib.config import CONF
 from models.capnet import CapNet
 from scripts.eval_pretrained import SCANREFER_TRAIN
+from tridetr.models.model_3detr import build_3detr
 
 # SCANREFER_DUMMY = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_dummy.json")))
 

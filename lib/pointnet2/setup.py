@@ -18,6 +18,8 @@ os.environ["TORCH_CUDA_ARCH_LIST"] = "3.7+PTX;5.0;6.0;6.1;6.2;7.0;7.5"
 
 exec(open("_version.py").read())
 
+headers = "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), '_ext_src', 'include')
+
 setup(
     name='pointnet2',
     version=__version__,
@@ -28,12 +30,12 @@ setup(
             name='pointnet2._ext',
             sources=_ext_sources,
             extra_compile_args={
-                "cxx": ["-O3"],
-                "nvcc": ["-O3", "-Xfatbin", "-compress-all"],
+                "cxx": ["-O3", headers],
+                "nvcc": ["-O3", "-Xfatbin", "-compress-all", headers],
             },
             include_dirs=[osp.join(_this_dir, _ext_src_root, "include")],
         )
     ],
-    cmdclass={"build_ext": BuildExtension},
+    cmdclass={"build_ext": BuildExtension.with_options(use_ninja=False)},
     include_package_data=True,
 )

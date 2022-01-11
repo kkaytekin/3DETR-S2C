@@ -30,7 +30,7 @@ __global__ void group_points_kernel(int b, int c, int n, int npoints,
 void group_points_kernel_wrapper(int b, int c, int n, int npoints, int nsample,
                                  const float *points, const int *idx,
                                  float *out) {
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
 
   group_points_kernel<<<b, opt_block_config(npoints, c), 0, stream>>>(
       b, c, n, npoints, nsample, points, idx, out);
@@ -66,7 +66,7 @@ __global__ void group_points_grad_kernel(int b, int c, int n, int npoints,
 void group_points_grad_kernel_wrapper(int b, int c, int n, int npoints,
                                       int nsample, const float *grad_out,
                                       const int *idx, float *grad_points) {
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
 
   group_points_grad_kernel<<<b, opt_block_config(npoints, c), 0, stream>>>(
       b, c, n, npoints, nsample, grad_out, idx, grad_points);

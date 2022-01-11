@@ -46,7 +46,7 @@ __global__ void query_ball_point_kernel(int b, int n, int m, float radius,
 void query_ball_point_kernel_wrapper(int b, int n, int m, float radius,
                                      int nsample, const float *new_xyz,
                                      const float *xyz, int *idx) {
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   query_ball_point_kernel<<<b, opt_n_threads(m), 0, stream>>>(
       b, n, m, radius, nsample, new_xyz, xyz, idx);
 
