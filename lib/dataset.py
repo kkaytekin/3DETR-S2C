@@ -384,8 +384,8 @@ class ScannetReferenceDataset(ReferenceDataset):
         ref_box_corner_label = np.zeros((8, 3))
 
         num_bbox = 1
-        point_votes = np.zeros([self.num_points, 3])
-        point_votes_mask = np.zeros(self.num_points)
+        #point_votes = np.zeros([self.num_points, 3])
+        #point_votes_mask = np.zeros(self.num_points)
         
         num_bbox = instance_bboxes.shape[0] if instance_bboxes.shape[0] < MAX_NUM_OBJ else MAX_NUM_OBJ
         target_bboxes_mask[0:num_bbox] = 1
@@ -434,12 +434,12 @@ class ScannetReferenceDataset(ReferenceDataset):
             # find all points belong to that instance
             ind = np.where(instance_labels == i_instance)[0]
             # find the semantic label            
-            if semantic_labels[ind[0]] in DC.nyu40ids:
-                x = point_cloud[ind,:3]
-                center = 0.5*(x.min(0) + x.max(0))
-                point_votes[ind, :] = center - x
-                point_votes_mask[ind] = 1.0
-        point_votes = np.tile(point_votes, (1, 3)) # make 3 votes identical 
+        #     if semantic_labels[ind[0]] in DC.nyu40ids:
+        #         x = point_cloud[ind,:3]
+        #         center = 0.5*(x.min(0) + x.max(0))
+        #         point_votes[ind, :] = center - x
+        #         point_votes_mask[ind] = 1.0
+        # point_votes = np.tile(point_votes, (1, 3)) # make 3 votes identical
         
         class_ind = [DC.nyu40id2class[int(x)] for x in instance_bboxes[:num_bbox,-2]]
         # NOTE: set size class as semantic class. Consider use size2class.
@@ -520,8 +520,8 @@ class ScannetReferenceDataset(ReferenceDataset):
         data_dict["scene_object_rotations"] = scene_object_rotations.astype(np.float32) # (MAX_NUM_OBJ, 3, 3)
         data_dict["scene_object_rotation_masks"] = scene_object_rotation_masks.astype(np.int64) # (MAX_NUM_OBJ)
         data_dict["box_label_mask"] = target_bboxes_mask.astype(np.float32) # (MAX_NUM_OBJ) as 0/1 with 1 indicating a unique box
-        data_dict["vote_label"] = point_votes.astype(np.float32)
-        data_dict["vote_label_mask"] = point_votes_mask.astype(np.int64)
+        #data_dict["vote_label"] = point_votes.astype(np.float32)
+        #data_dict["vote_label_mask"] = point_votes_mask.astype(np.int64)
         data_dict["dataset_idx"] = np.array(idx).astype(np.int64)
         data_dict["pcl_color"] = pcl_color
         data_dict["ref_box_label"] = ref_box_label.astype(np.int64) # 0/1 reference labels for each object bbox

@@ -57,7 +57,7 @@ class ProposalModule(nn.Module):
             nn.Conv1d(128,128,1, bias=False),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Conv1d(128,2+3+num_heading_bin*2+num_size_cluster*4+self.num_class,1)
+            nn.Conv1d(128,2+3+num_heading_bin*2+num_size_cluster*4+self.num_class+128,1) # Add 128 for bbox features
         )
 
     def forward(self, xyz, features, data_dict):
@@ -95,12 +95,21 @@ class ProposalModule(nn.Module):
         )
         features = features.reshape(num_layers * batch, channel, num_proposal)
         # --------- PROPOSAL GENERATION ---------
-        # mlp outputs: ( (num_layers * batch), 2+3+NH*2+NS*4, num_outputs )
+        # mlp outputs: ( (num_layers * batch), 2+3+NH*2+NS*4+128, num_outputs )
         net = self.proposal(features)
-        net = net.reshape(num_layers , batch, channel, -1)
+        net = net.reshape(num_layers , batch, num_proposal, -1)
         for i in range(num_layers):
-            data_dict["decoder{}_proposal".format(i)] = self.decode_scores(net[i,...].reshape(batch,channel,num_proposal),
+            data_dict["decoder{}_proposal".format(i)] = self.decode_scores(net[i,...].reshape(batch,num_proposal,-1),
                                                                            data_dict,
+                                                                           xyz,
+                                                                           self.num_class,
+                                                                           self.num_heading_bin,
+                                                                           self.num_size_cluster,
+                                                                           self.mean_size_arr)
+            if i == num_layers-1:
+                data_dict = self.decode_scores(net[i,...].reshape(batch,num_proposal,-1),
+                                                                           data_dict,
+                                                                           xyz,
                                                                            self.num_class,
                                                                            self.num_heading_bin,
                                                                            self.num_size_cluster,
@@ -132,28 +141,29 @@ class ProposalModule(nn.Module):
 
         return pred_bboxes
 
-    def decode_scores(self, net, data_dict, num_class, num_heading_bin, num_size_cluster, mean_size_arr):
+    def decode_scores(self, net, data_dict, xyz, num_class, num_heading_bin, num_size_cluster, mean_size_arr):
         """
         decode the predicted parameters for the bounding boxes
 
         """
-        net_transposed = net.transpose(1,2).contiguous() # (batch_size, 1024, ..)
-        batch_size = net_transposed.shape[0]
-        num_proposal = net_transposed.shape[1]
+        #net_transposed = net.transpose(1,2).contiguous() # (batch_size, 1024, ..)
+        batch_size = net.shape[0]
+        num_proposal = net.shape[1]
 
-        objectness_scores = net_transposed[:,:,0:2]
+        objectness_scores = net[:,:,0:2]
 
-        base_xyz = data_dict['aggregated_vote_xyz'] # (batch_size, num_proposal, 3)
+        #base_xyz = data_dict['aggregated_vote_xyz'] # (batch_size, num_proposal, 3)
         # base_xyz = query_xyz ???
-        center = base_xyz + net_transposed[:,:,2:5] # (batch_size, num_proposal, 3)
+        center = xyz + net[:,:,2:5] # (batch_size, num_proposal, 3)
 
-        heading_scores = net_transposed[:,:,5:5+num_heading_bin]
-        heading_residuals_normalized = net_transposed[:,:,5+num_heading_bin:5+num_heading_bin*2]
+        heading_scores = net[:,:,5:5+num_heading_bin]
+        heading_residuals_normalized = net[:,:,5+num_heading_bin:5+num_heading_bin*2]
         
-        size_scores = net_transposed[:,:,5+num_heading_bin*2:5+num_heading_bin*2+num_size_cluster]
-        size_residuals_normalized = net_transposed[:,:,5+num_heading_bin*2+num_size_cluster:5+num_heading_bin*2+num_size_cluster*4].view([batch_size, num_proposal, num_size_cluster, 3]) # Bxnum_proposalxnum_size_clusterx3
+        size_scores = net[:,:,5+num_heading_bin*2:5+num_heading_bin*2+num_size_cluster]
+        size_residuals_normalized = net[:,:,5+num_heading_bin*2+num_size_cluster:5+num_heading_bin*2+num_size_cluster*4].view([batch_size, num_proposal, num_size_cluster, 3]) # Bxnum_proposalxnum_size_clusterx3
         
-        sem_cls_scores = net_transposed[:,:,5+num_heading_bin*2+num_size_cluster*4:] # Bxnum_proposalx10
+        sem_cls_scores = net[:,:,5+num_heading_bin*2+num_size_cluster*4:5+num_heading_bin*2+num_size_cluster*4+num_class] # Bxnum_proposalx10
+        bbox_feature = net[:,:,5+num_heading_bin*2+num_size_cluster*4+num_class:]
 
         # store
         data_dict['objectness_scores'] = objectness_scores
@@ -167,7 +177,9 @@ class ProposalModule(nn.Module):
         data_dict['sem_cls_scores'] = sem_cls_scores
         # processed box info
         data_dict["bbox_corner"] = self.decode_pred_box(data_dict) # bounding box corner coordinates
-        data_dict["bbox_feature"] = data_dict["aggregated_vote_features"]
+        #data_dict["bbox_feature"] = data_dict["aggregated_vote_features"]
+        data_dict["bbox_feature"] = bbox_feature
+        data_dict["query_xyz"] = xyz # takes place of data_dict["aggregated_vote_xyz"]
         data_dict["bbox_mask"] = objectness_scores.argmax(-1)
         data_dict['bbox_sems'] = sem_cls_scores.argmax(-1)
         data_dict['sem_cls'] = sem_cls_scores.argmax(-1)

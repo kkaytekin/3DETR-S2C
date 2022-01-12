@@ -28,7 +28,6 @@ ITER_REPORT_TEMPLATE = """
 [loss] train_ori_loss: {train_ori_loss}
 [loss] train_dist_loss: {train_dist_loss}
 [loss] train_objectness_loss: {train_objectness_loss}
-[loss] train_vote_loss: {train_vote_loss}
 [loss] train_box_loss: {train_box_loss}
 [sco.] train_cap_acc: {train_cap_acc}
 [sco.] train_ori_acc: {train_ori_acc}
@@ -225,7 +224,7 @@ class Solver():
                 "ori_loss": [],
                 "dist_loss": [],
                 "objectness_loss": [],
-                "vote_loss": [],
+                #"vote_loss": [],
                 "box_loss": [],
                 # scores (float, not torch.cuda.FloatTensor)
                 "lang_acc": [],
@@ -259,7 +258,9 @@ class Solver():
     def _dump_log(self, phase, is_eval=False):
         if phase == "train" and not is_eval:
             log = {
-                "loss": ["loss", "cap_loss", "ori_loss", "dist_loss", "objectness_loss", "vote_loss", "box_loss"],
+                "loss": ["loss", "cap_loss", "ori_loss", "dist_loss", "objectness_loss",
+                         #"vote_loss",
+                         "box_loss"],
                 "score": ["lang_acc", "cap_acc", "ori_acc", "obj_acc", "pred_ious", "pos_ratio", "neg_ratio"]
             }
             for key in log:
@@ -318,7 +319,7 @@ class Solver():
         self._running_log["ori_loss"] = data_dict["ori_loss"]
         self._running_log["dist_loss"] = data_dict["dist_loss"]
         self._running_log["objectness_loss"] = data_dict["objectness_loss"]
-        self._running_log["vote_loss"] = data_dict["vote_loss"]
+        #self._running_log["vote_loss"] = data_dict["vote_loss"]
         self._running_log["box_loss"] = data_dict["box_loss"]
         self._running_log["loss"] = data_dict["loss"]
 
@@ -389,7 +390,7 @@ class Solver():
                     "ori_loss": 0,
                     "dist_loss": 0,
                     "objectness_loss": 0,
-                    "vote_loss": 0,
+                    #"vote_loss": 0,
                     "box_loss": 0,
                     # acc
                     "lang_acc": 0,
@@ -426,7 +427,7 @@ class Solver():
                 self.log[phase]["ori_loss"].append(self._running_log["ori_loss"].item())
                 self.log[phase]["dist_loss"].append(self._running_log["dist_loss"].item())
                 self.log[phase]["objectness_loss"].append(self._running_log["objectness_loss"].item())
-                self.log[phase]["vote_loss"].append(self._running_log["vote_loss"].item())
+                #self.log[phase]["vote_loss"].append(self._running_log["vote_loss"].item())
                 self.log[phase]["box_loss"].append(self._running_log["box_loss"].item())
 
                 self.log[phase]["lang_acc"].append(self._running_log["lang_acc"])
@@ -548,7 +549,7 @@ class Solver():
             train_ori_loss=round(np.mean([v for v in self.log["train"]["ori_loss"]]), 5),
             train_dist_loss=round(np.mean([v for v in self.log["train"]["dist_loss"]]), 5),
             train_objectness_loss=round(np.mean([v for v in self.log["train"]["objectness_loss"]]), 5),
-            train_vote_loss=round(np.mean([v for v in self.log["train"]["vote_loss"]]), 5),
+            #train_vote_loss=round(np.mean([v for v in self.log["train"]["vote_loss"]]), 5),
             train_box_loss=round(np.mean([v for v in self.log["train"]["box_loss"]]), 5),
             train_cap_acc=round(np.mean([v for v in self.log["train"]["cap_acc"]]), 5),
             train_ori_acc=round(np.mean([v for v in self.log["train"]["ori_acc"]]), 5),

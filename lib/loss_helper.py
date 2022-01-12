@@ -21,6 +21,7 @@ NEAR_THRESHOLD = 0.3
 GT_VOTE_FACTOR = 3 # number of GT votes per point
 OBJECTNESS_CLS_WEIGHTS = [0.2, 0.8] # put larger weights on positive objectness
 
+#Discarded in 3DETR
 def compute_vote_loss(data_dict):
     """ Compute vote loss: Match predicted votes to GT votes.
 
@@ -67,7 +68,7 @@ def compute_vote_loss(data_dict):
     votes_dist = votes_dist.view(batch_size, num_seed)
     vote_loss = torch.sum(votes_dist*seed_gt_votes_mask.float())/(torch.sum(seed_gt_votes_mask.float())+1e-6)
     return vote_loss
-
+# TODO: Consider relaxing or replacing
 def compute_objectness_loss(data_dict):
     """ Compute objectness loss for the proposals.
 
@@ -82,12 +83,13 @@ def compute_objectness_loss(data_dict):
             within [0,num_gt_object-1]
     """ 
     # Associate proposal and GT objects by point-to-point distances
-    aggregated_vote_xyz = data_dict["aggregated_vote_xyz"]
+    # aggregated_vote_xyz = data_dict["aggregated_vote_xyz"]
+    query_xyz = data_dict["query_xyz"]
     gt_center = data_dict["center_label"][:,:,0:3]
     B = gt_center.shape[0]
-    K = aggregated_vote_xyz.shape[1]
+    K = query_xyz.shape[1]
     K2 = gt_center.shape[1]
-    dist1, ind1, dist2, _ = nn_distance(aggregated_vote_xyz, gt_center) # dist1: BxK, dist2: BxK2
+    dist1, ind1, dist2, _ = nn_distance(query_xyz, gt_center) # dist1: BxK, dist2: BxK2
 
     # Generate objectness label and mask
     # objectness_label: 1 if pred object center is within NEAR_THRESHOLD of any GT object
@@ -392,7 +394,7 @@ def get_scene_cap_loss(data_dict, device, config, weights,
     """
 
     # Vote loss
-    vote_loss = compute_vote_loss(data_dict)
+    #vote_loss = compute_vote_loss(data_dict)
 
     # Obj loss
     objectness_loss, objectness_label, objectness_mask, object_assignment = compute_objectness_loss(data_dict)
@@ -414,7 +416,7 @@ def get_scene_cap_loss(data_dict, device, config, weights,
     data_dict["obj_acc"] = obj_acc
 
     if detection:
-        data_dict["vote_loss"] = vote_loss
+        #data_dict["vote_loss"] = vote_loss
         data_dict["objectness_loss"] = objectness_loss
         data_dict["center_loss"] = center_loss
         data_dict["heading_cls_loss"] = heading_cls_loss
@@ -424,7 +426,7 @@ def get_scene_cap_loss(data_dict, device, config, weights,
         data_dict["sem_cls_loss"] = sem_cls_loss
         data_dict["box_loss"] = box_loss
     else:
-        data_dict["vote_loss"] = torch.zeros(1)[0].to(device)
+        #data_dict["vote_loss"] = torch.zeros(1)[0].to(device)
         data_dict["objectness_loss"] = torch.zeros(1)[0].to(device)
         data_dict["center_loss"] = torch.zeros(1)[0].to(device)
         data_dict["heading_cls_loss"] = torch.zeros(1)[0].to(device)
@@ -467,10 +469,15 @@ def get_scene_cap_loss(data_dict, device, config, weights,
         data_dict["dist_loss"] = torch.zeros(1)[0].to(device)
 
     # Final loss function
-    # loss = data_dict["vote_loss"] + 0.5*data_dict["objectness_loss"] + data_dict["box_loss"] + 0.1*data_dict["sem_cls_loss"] + data_dict["cap_loss"]
+    #loss = data_dict["vote_loss"] + \...
+    loss = 0.5*data_dict["objectness_loss"] + \
+           data_dict["box_loss"] + \
+           0.1*data_dict["sem_cls_loss"] + \
+           data_dict["cap_loss"]
 
     if detection:
-        loss = data_dict["vote_loss"] + 0.5*data_dict["objectness_loss"] + data_dict["box_loss"] + 0.1*data_dict["sem_cls_loss"]
+        #loss = data_dict["vote_loss"] + 0.5*data_dict["objectness_loss"] + data_dict["box_loss"] + 0.1*data_dict["sem_cls_loss"]
+        loss = 0.5*data_dict["objectness_loss"] + data_dict["box_loss"] + 0.1*data_dict["sem_cls_loss"]
         loss *= 10 # amplify
         if caption:
             loss += data_dict["cap_loss"]
