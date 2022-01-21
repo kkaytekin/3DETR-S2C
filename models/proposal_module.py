@@ -98,22 +98,35 @@ class ProposalModule(nn.Module):
         # mlp outputs: ( (num_layers * batch), 2+3+NH*2+NS*4+128, num_outputs )
         net = self.proposal(features)
         net = net.reshape(num_layers , batch, num_proposal, -1)
-        for i in range(num_layers):
-            data_dict["decoder{}_proposal".format(i)] = self.decode_scores(net[i,...].reshape(batch,num_proposal,-1),
-                                                                           data_dict,
-                                                                           xyz,
-                                                                           self.num_class,
-                                                                           self.num_heading_bin,
-                                                                           self.num_size_cluster,
-                                                                           self.mean_size_arr)
-            if i == num_layers-1:
-                data_dict = self.decode_scores(net[i,...].reshape(batch,num_proposal,-1),
-                                                                           data_dict,
-                                                                           xyz,
-                                                                           self.num_class,
-                                                                           self.num_heading_bin,
-                                                                           self.num_size_cluster,
-                                                                           self.mean_size_arr)
+
+        #Compute each decoder proposal in training
+        if self.training:
+            for i in range(num_layers):
+                data_dict["decoder{}_proposal".format(i)] = self.decode_scores(net[i,...].reshape(batch,num_proposal,-1),
+                                                                               data_dict,
+                                                                               xyz,
+                                                                               self.num_class,
+                                                                               self.num_heading_bin,
+                                                                               self.num_size_cluster,
+                                                                               self.mean_size_arr)
+                if i == num_layers-1:
+                    data_dict = self.decode_scores(net[i,...].reshape(batch,num_proposal,-1),
+                                                                               data_dict,
+                                                                               xyz,
+                                                                               self.num_class,
+                                                                               self.num_heading_bin,
+                                                                               self.num_size_cluster,
+                                                                               self.mean_size_arr)
+        #store only the final decoder output in evaluation mode
+        else:
+            data_dict = self.decode_scores(net[num_layers-1,...].reshape(batch,num_proposal,-1),
+                                                                               data_dict,
+                                                                               xyz,
+                                                                               self.num_class,
+                                                                               self.num_heading_bin,
+                                                                               self.num_size_cluster,
+                                                                               self.mean_size_arr)
+        data_dict["num_decoder_layers"] = num_layers
         return data_dict
 
     def decode_pred_box(self, data_dict):
@@ -162,7 +175,7 @@ class ProposalModule(nn.Module):
         size_scores = net[:,:,5+num_heading_bin*2:5+num_heading_bin*2+num_size_cluster]
         size_residuals_normalized = net[:,:,5+num_heading_bin*2+num_size_cluster:5+num_heading_bin*2+num_size_cluster*4].view([batch_size, num_proposal, num_size_cluster, 3]) # Bxnum_proposalxnum_size_clusterx3
         
-        sem_cls_scores = net[:,:,5+num_heading_bin*2+num_size_cluster*4:5+num_heading_bin*2+num_size_cluster*4+num_class] # Bxnum_proposalx10
+        sem_cls_scores = net[:,:,5+num_heading_bin*2+num_size_cluster*4:5+num_heading_bin*2+num_size_cluster*4+num_class] # Bxnum_proposalx18
         bbox_feature = net[:,:,5+num_heading_bin*2+num_size_cluster*4+num_class:]
 
         # store

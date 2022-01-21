@@ -20,6 +20,9 @@ def select_target(data_dict):
 
     # ground truth bbox
     gt_bbox = data_dict["ref_box_corner_label"] # batch_size, 8, 3
+    # debug: Check if all objects have the same locations.
+    # Answer: The dataset antonio sent has bboxes in different locations... Need larger batch
+    # print("Sum of gt_bbox corner locations:", torch.sum(gt_bbox))
 
     target_ids = []
     target_ious = []
@@ -29,6 +32,8 @@ def select_target(data_dict):
         gt_bbox_batch = gt_bbox[i].unsqueeze(0).repeat(num_proposals, 1, 1) # num_proposals, 8, 3
         ious = box3d_iou_batch_tensor(pred_bbox_batch, gt_bbox_batch)
         target_id = ious.argmax().item() # 0 ~ num_proposals - 1
+        # debug
+        print("Max iou: ", ious[target_id])
         target_ids.append(target_id)
         target_ious.append(ious[target_id])
 
@@ -93,7 +98,20 @@ class SceneCaptionModule(nn.Module):
         obj_feats = self.map_feat(obj_feats) # batch_size, num_proposals, emb_size
 
         # find the target object ids
-        target_ids, target_ious = select_target(data_dict)
+        # Consider the last decoder output when selecting the target.
+
+        num_decoders = data_dict['num_decoder_layers']
+        for i in range(num_decoders):
+            target_ids, target_ious = select_target(data_dict)
+            # NOTE when the IoU of best matching predicted boxes and the GT boxes
+            # are smaller than the threshold, the corresponding predicted captions
+            # should be filtered out in case the model learns wrong things
+            good_bbox_masks = target_ious > min_iou # batch_size
+            # good_bbox_masks = target_ious != 0 # batch_size
+            data_dict["decoder{}_proposal".format(i)]["good_bbox_masks"] = good_bbox_masks
+            if i == num_decoders - 1:
+                data_dict["good_bbox_masks"] = good_bbox_masks
+
 
         # select object features
         target_feats = torch.gather(
@@ -120,19 +138,13 @@ class SceneCaptionModule(nn.Module):
 
         outputs = torch.cat(outputs, dim=1) # batch_size, num_words - 1/max_len, num_vocabs
 
-        # NOTE when the IoU of best matching predicted boxes and the GT boxes 
-        # are smaller than the threshold, the corresponding predicted captions
-        # should be filtered out in case the model learns wrong things
-        good_bbox_masks = target_ious > min_iou # batch_size
-        # good_bbox_masks = target_ious != 0 # batch_size
-
         num_good_bboxes = good_bbox_masks.sum()
         mean_target_ious = target_ious[good_bbox_masks].mean() if num_good_bboxes > 0 else torch.zeros(1)[0].cuda()
 
         # store
         data_dict["lang_cap"] = outputs
         data_dict["pred_ious"] = mean_target_ious
-        data_dict["good_bbox_masks"] = good_bbox_masks
+
 
         return data_dict
 

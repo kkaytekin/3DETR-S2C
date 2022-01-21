@@ -18,7 +18,7 @@ sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
 from lib.config import CONF
 from utils.pc_utils import write_ply_rgb
 
-SCANNET_MESH = "/cluster/sorona/dchen/ScanNet_axis_aligned_mesh/{}/axis_aligned_scene.ply"
+SCANNET_MESH = "/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/{}/axis_aligned_scene.ply"
 
 BBOX_PATH = os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_{}_gt_bbox.json") # val or test
 

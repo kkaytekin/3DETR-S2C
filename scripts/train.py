@@ -392,7 +392,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
     )
-    parser.add_argument("--nqueries", default=256, type=int)
+    #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
     #parser.add_argument("--use_color", default=False, action="store_true")
 
     args = parser.parse_args()

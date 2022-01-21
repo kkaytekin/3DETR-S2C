@@ -32,8 +32,11 @@ from models.capnet import CapNet
 from lib.eval_helper import eval_cap
 from scripts.colors import COLORS
 
+from tridetr.models.model_3detr import build_3detr
+
 SCANNET_MESH = os.path.join(CONF.PATH.AXIS_ALIGNED_MESH, "{}", "axis_aligned_scene.ply")
 SCANNET_AGGR = os.path.join(CONF.PATH.SCANNET_SCANS, "{}/{}_vh_clean.aggregation.json") # scene_id, scene_id
+#SCANNET_AGGR = os.path.join(CONF.PATH.SCANNET_SCANS, "{}/{}_vh_clean.aggregation.json") # scene_id, scene_id
 
 SCANREFER_TRAIN = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
 SCANREFER_VAL = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_val.json")))
@@ -61,6 +64,7 @@ def get_dataloader(args, scanrefer, all_scene_list, config):
 def get_model(args, dataset, root=CONF.PATH.OUTPUT):
     # initiate model
     input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
+    tridetr , _ = build_3detr(args, dataset_config=DC)
     model = CapNet(
         num_class=DC.num_class,
         vocabulary=dataset.vocabulary,
@@ -68,15 +72,21 @@ def get_model(args, dataset, root=CONF.PATH.OUTPUT):
         num_heading_bin=DC.num_heading_bin,
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
+
+        tridetrmodel=tridetr,
+
         input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
-        no_caption=False,
+        no_caption=args.no_caption,
         use_topdown=args.use_topdown,
         num_locals=args.num_locals,
         query_mode=args.query_mode,
         graph_mode=args.graph_mode,
         num_graph_steps=args.num_graph_steps,
-        use_relation=args.use_relation
+        use_relation=args.use_relation, # TODO: the rest ist training args, change in eval
+        use_orientation=args.use_orientation,
+        use_distance=args.use_distance,
+        use_new=args.use_new
     )
 
     # load
@@ -384,22 +394,23 @@ def visualize(args):
             with open(pred_path, "w") as f:
                 json.dump(candidates, f, indent=4)
 
-            gt_object_ids = VOTENET_DATABASE["0|{}_gt_ids".format(scene_id)]
-            gt_object_ids = np.array(gt_object_ids)
-
-            gt_bbox_corners = VOTENET_DATABASE["0|{}_gt_corners".format(scene_id)]
-            gt_bbox_corners = np.array(gt_bbox_corners)
-
-            for i, object_id in enumerate(gt_object_ids):
-                object_id = str(int(object_id))
-                object_name = object_id_to_object_name[scene_id][object_id]
-
-                ply_name = "gt-{}-{}.ply".format(object_id, object_name)
-                ply_path = os.path.join(scene_root, ply_name)
-
-                palette_idx = int(object_id) % len(COLORS)
-                color = COLORS[palette_idx]
-                write_bbox(gt_bbox_corners[i], color, ply_path)
+            # TODO: Learn to print GT bboxes
+            # gt_object_ids = VOTENET_DATABASE["0|{}_gt_ids".format(scene_id)]
+            # gt_object_ids = np.array(gt_object_ids)
+            #
+            # gt_bbox_corners = VOTENET_DATABASE["0|{}_gt_corners".format(scene_id)]
+            # gt_bbox_corners = np.array(gt_bbox_corners)
+            #
+            # for i, object_id in enumerate(gt_object_ids):
+            #     object_id = str(int(object_id))
+            #     object_name = object_id_to_object_name[scene_id][object_id]
+            #
+            #     ply_name = "gt-{}-{}.ply".format(object_id, object_name)
+            #     ply_path = os.path.join(scene_root, ply_name)
+            #
+            #     palette_idx = int(object_id) % len(COLORS)
+            #     color = COLORS[palette_idx]
+            #     write_bbox(gt_bbox_corners[i], color, ply_path)
 
     print("done!")
 
@@ -419,7 +430,12 @@ if __name__ == "__main__":
     parser.add_argument("--graph_mode", type=str, default="edge_conv", help="Mode for querying the local context, [choices: graph_conv, edge_conv]")
     parser.add_argument("--graph_aggr", type=str, default="add", help="Mode for aggregating features, [choices: add, mean, max]")
     parser.add_argument("--no_height", action="store_true", help="Do NOT use height signal in input.")
-    
+
+    # TODO: currently using the call the train capnet, change that to eval capnet. the following values are not needed.
+    parser.add_argument("--no_caption", action="store_true", help="Do NOT train the caption module.")
+    parser.add_argument("--use_orientation", action="store_true", help="Use object-to-object orientation loss in graph.")
+    parser.add_argument("--use_new", action="store_true", help="Use new Top-down module.")
+
     parser.add_argument("--use_tf", action="store_true", help="Enable teacher forcing")
     parser.add_argument("--use_color", action="store_true", help="Use RGB color in input.")
     parser.add_argument("--use_normal", action="store_true", help="Use RGB color in input.")
@@ -428,6 +444,48 @@ if __name__ == "__main__":
     parser.add_argument("--use_last", action="store_true", help="Use the last model")
     parser.add_argument("--use_topdown", action="store_true", help="Use top-down attention for captioning.")
     parser.add_argument("--use_relation", action="store_true", help="Use object-to-object relation in graph.")
+    parser.add_argument("--use_distance", action="store_true", help="Use object-to-object distance loss in graph.")
+    # -------------------- 3DETR ARGS -------------------------
+        # TODO: Determine what to parse,
+    #   *which ones affect datalooader & preprocessing,
+    #   *which ones affect the rest?
+    ### Encoder
+    parser.add_argument(
+        "--enc_type", default="vanilla", choices=["masked", "maskedv2", "vanilla"]
+    )
+    # Below options are only valid for vanilla encoder
+    parser.add_argument("--enc_nlayers", default=3, type=int)
+    parser.add_argument("--enc_dim", default=256, type=int)
+    parser.add_argument("--enc_ffn_dim", default=128, type=int)
+    parser.add_argument("--enc_dropout", default=0.1, type=float)
+    parser.add_argument("--enc_nhead", default=4, type=int)
+    parser.add_argument("--enc_pos_embed", default=None, type=str)
+    parser.add_argument("--enc_activation", default="relu", type=str)
+
+    ### Decoder
+    parser.add_argument("--dec_nlayers", default=8, type=int)
+    parser.add_argument("--dec_dim", default=256, type=int)
+    parser.add_argument("--dec_ffn_dim", default=256, type=int)
+    parser.add_argument("--dec_dropout", default=0.1, type=float)
+    parser.add_argument("--dec_nhead", default=4, type=int)
+
+    # ### MLP heads for predicting bounding boxes
+    # parser.add_argument("--mlp_dropout", default=0.3, type=float)
+    # parser.add_argument(
+    #     "--nsemcls",
+    #     default=-1,
+    #     type=int,
+    #     help="Number of semantic object classes. Can be inferred from dataset",
+    # )
+
+    ### Other model params
+    parser.add_argument("--preenc_npoints", default=2048, type=int)
+    parser.add_argument(
+        "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
+    )
+    #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
+    #parser.add_argument("--use_color", default=False, action="store_true")
+
     args = parser.parse_args()
 
     # setting

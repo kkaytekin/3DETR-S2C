@@ -425,7 +425,7 @@ def build_3detr(args, dataset_config):
         encoder_dim=args.enc_dim,
         decoder_dim=args.dec_dim,
         #mlp_dropout=args.mlp_dropout,
-        num_queries=args.nqueries,
+        num_queries=args.num_proposals,
     )
     output_processor = BoxProcessor(dataset_config)
     return model, output_processor
