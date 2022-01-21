@@ -16,6 +16,8 @@ from lib.loss import SoftmaxRankingLoss
 from utils.box_util import get_3d_box, get_3d_box_batch, box3d_iou, box3d_iou_batch
 from lib.config import CONF
 
+# FAR_THRESHOLD = 0.6
+# NEAR_THRESHOLD = 0.3
 FAR_THRESHOLD = 0.6
 NEAR_THRESHOLD = 0.3
 GT_VOTE_FACTOR = 3 # number of GT votes per point
@@ -210,6 +212,7 @@ def compute_cap_loss(data_dict, config, weights):
     cap_loss = criterion(pred_caps.reshape(-1, num_vocabs), target_caps.reshape(-1))
 
     # mask out bad boxes
+    # debug: print("num. of good masks: ",torch.sum(data_dict["good_bbox_masks"]))
     good_bbox_masks = data_dict["good_bbox_masks"].unsqueeze(1).repeat(1, num_words-1) # (B, num_words - 1)
     good_bbox_masks = good_bbox_masks.reshape(-1) # (B * num_words - 1)
     cap_loss = torch.sum(cap_loss * good_bbox_masks) / (torch.sum(good_bbox_masks) + 1e-6)
@@ -380,7 +383,8 @@ def compute_object_cls_loss(data_dict, weights):
 
     return cls_loss, cls_acc
 
-def get_scene_cap_loss(data_dict, device, config, weights, 
+# The main loss calculation function
+def get_scene_cap_loss(data_dict, device, config, weights,
     detection=True, caption=True, orientation=False, distance=False, num_bins=CONF.TRAIN.NUM_BINS):
     """ Loss functions
 
@@ -395,53 +399,74 @@ def get_scene_cap_loss(data_dict, device, config, weights,
 
     # Vote loss
     #vote_loss = compute_vote_loss(data_dict)
-
+    #TODO: Pass the loss coefficients from args.
+    detection_coeff = 1
+    cap_coeff = 1
+    ori_coeff = 1
+    dist_coeff = 1
+    loss = 0
     # Obj loss
-    objectness_loss, objectness_label, objectness_mask, object_assignment = compute_objectness_loss(data_dict)
-    num_proposal = objectness_label.shape[1]
-    total_num_proposal = objectness_label.shape[0]*objectness_label.shape[1]
-    data_dict["objectness_label"] = objectness_label
-    data_dict["objectness_mask"] = objectness_mask
-    data_dict["object_assignment"] = object_assignment
-    data_dict["pos_ratio"] = torch.sum(objectness_label.float().to(device))/float(total_num_proposal)
-    data_dict["neg_ratio"] = torch.sum(objectness_mask.float())/float(total_num_proposal) - data_dict["pos_ratio"]
+    num_decoders = data_dict["num_decoder_layers"]
+    for i in range(num_decoders):
+        # HACK
+        # reason: before training, this function is called somewhere. intermediate decoders are not stored there.
+        ddict_key = 'decoder{}_proposal'.format(i) # key to call from data_dict
+        try:
+            loss_func_input = data_dict[ddict_key]
+        except KeyError:
+            loss_func_input = data_dict
 
-    # Box loss and sem cls loss
-    center_loss, heading_cls_loss, heading_reg_loss, size_cls_loss, size_reg_loss, sem_cls_loss = compute_box_and_sem_cls_loss(data_dict, config)
-    box_loss = center_loss + 0.1*heading_cls_loss + heading_reg_loss + 0.1*size_cls_loss + size_reg_loss
+        objectness_loss, objectness_label, objectness_mask, object_assignment = compute_objectness_loss( loss_func_input )
+        num_proposal = objectness_label.shape[1]
+        total_num_proposal = objectness_label.shape[0]*objectness_label.shape[1]
+        data_dict["objectness_label"] = objectness_label # TODO: is this for logging?
+        data_dict["objectness_mask"] = objectness_mask
+        data_dict["object_assignment"] = object_assignment
+        data_dict["pos_ratio"] = torch.sum(objectness_label.float().to(device))/float(total_num_proposal)
+        data_dict["neg_ratio"] = torch.sum(objectness_mask.float())/float(total_num_proposal) - data_dict["pos_ratio"]
 
-    # objectness
-    obj_pred_val = torch.argmax(data_dict["objectness_scores"], 2) # B,K
-    obj_acc = torch.sum((obj_pred_val==data_dict["objectness_label"].long()).float()*data_dict["objectness_mask"])/(torch.sum(data_dict["objectness_mask"])+1e-6)
-    data_dict["obj_acc"] = obj_acc
+        # Box loss and sem cls loss
+        center_loss, heading_cls_loss, heading_reg_loss, size_cls_loss, size_reg_loss, sem_cls_loss = compute_box_and_sem_cls_loss(loss_func_input, config)
+        box_loss = center_loss + 0.1*heading_cls_loss + heading_reg_loss + 0.1*size_cls_loss + size_reg_loss
 
-    if detection:
-        #data_dict["vote_loss"] = vote_loss
-        data_dict["objectness_loss"] = objectness_loss
-        data_dict["center_loss"] = center_loss
-        data_dict["heading_cls_loss"] = heading_cls_loss
-        data_dict["heading_reg_loss"] = heading_reg_loss
-        data_dict["size_cls_loss"] = size_cls_loss
-        data_dict["size_reg_loss"] = size_reg_loss
-        data_dict["sem_cls_loss"] = sem_cls_loss
-        data_dict["box_loss"] = box_loss
-    else:
-        #data_dict["vote_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["objectness_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["center_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["heading_cls_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["heading_reg_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["size_cls_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["size_reg_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["sem_cls_loss"] = torch.zeros(1)[0].to(device)
-        data_dict["box_loss"] = torch.zeros(1)[0].to(device)
+        # objectness # TODO: is this for logging?
+        obj_pred_val = torch.argmax(data_dict["objectness_scores"], 2) # B,K
+        obj_acc = torch.sum((obj_pred_val==data_dict["objectness_label"].long()).float()*data_dict["objectness_mask"])/(torch.sum(data_dict["objectness_mask"])+1e-6)
+        data_dict["obj_acc"] = obj_acc
+
+        if detection:
+            #data_dict["vote_loss"] = vote_loss
+            if i == num_decoders - 1:
+                data_dict["objectness_loss"] = objectness_loss
+                data_dict["center_loss"] = center_loss
+                data_dict["heading_cls_loss"] = heading_cls_loss
+                data_dict["heading_reg_loss"] = heading_reg_loss
+                data_dict["size_cls_loss"] = size_cls_loss
+                data_dict["size_reg_loss"] = size_reg_loss
+                data_dict["sem_cls_loss"] = sem_cls_loss
+                data_dict["box_loss"] = box_loss
+
+
+            loss += detection_coeff * (0.5*objectness_loss + box_loss + 0.1 * sem_cls_loss)
+        else:
+            if i == num_decoders - 1:
+                #data_dict["vote_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["objectness_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["center_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["heading_cls_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["heading_reg_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["size_cls_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["size_reg_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["sem_cls_loss"] = torch.zeros(1)[0].to(device)
+                data_dict["box_loss"] = torch.zeros(1)[0].to(device)
 
     if caption:
         cap_loss, cap_acc = compute_cap_loss(data_dict, config, weights)
-
         # store
         data_dict["cap_loss"] = cap_loss
         data_dict["cap_acc"] = cap_acc
+
+        loss += cap_coeff * data_dict["cap_loss"]
     else:
         # store
         data_dict["cap_loss"] = torch.zeros(1)[0].to(device)
@@ -454,6 +479,8 @@ def get_scene_cap_loss(data_dict, device, config, weights,
         # store
         data_dict["ori_loss"] = ori_loss
         data_dict["ori_acc"] = ori_acc
+
+        loss += ori_coeff * data_dict["ori_loss"]
     else:
         # store
         data_dict["ori_loss"] = torch.zeros(1)[0].to(device)
@@ -464,39 +491,16 @@ def get_scene_cap_loss(data_dict, device, config, weights,
 
         # store
         data_dict["dist_loss"] = dist_loss
+        loss += dist_coeff * data_dict["dist_loss"]
     else:
         # store
         data_dict["dist_loss"] = torch.zeros(1)[0].to(device)
-
-    # Final loss function
-    #loss = data_dict["vote_loss"] + \...
-    loss = 0.5*data_dict["objectness_loss"] + \
-           data_dict["box_loss"] + \
-           0.1*data_dict["sem_cls_loss"] + \
-           data_dict["cap_loss"]
-
-    if detection:
-        #loss = data_dict["vote_loss"] + 0.5*data_dict["objectness_loss"] + data_dict["box_loss"] + 0.1*data_dict["sem_cls_loss"]
-        loss = 0.5*data_dict["objectness_loss"] + data_dict["box_loss"] + 0.1*data_dict["sem_cls_loss"]
-        loss *= 10 # amplify
-        if caption:
-            loss += data_dict["cap_loss"]
-        if orientation:
-            loss += 0.1*data_dict["ori_loss"]
-        if distance:
-            loss += 0.1*data_dict["dist_loss"]
-            # loss += data_dict["dist_loss"]
-    else:
-        loss = data_dict["cap_loss"]
-        if orientation:
-            loss += 0.1*data_dict["ori_loss"]
-        if distance:
-            loss += 0.1*data_dict["dist_loss"]
 
     data_dict["loss"] = loss
 
     return data_dict
 
+# Never used
 def get_object_cap_loss(data_dict, config, weights, classify=True, caption=True):
     """ Loss functions
 

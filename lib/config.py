@@ -24,7 +24,7 @@ CONF.PATH.SCANNET_META = os.path.join(CONF.PATH.SCANNET, "meta_data")
 CONF.PATH.SCANNET_DATA = os.path.join(CONF.PATH.SCANNET, "scannet_data")
 
 # Scan2CAD
-CONF.PATH.SCAN2CAD = os.path.join(CONF.PATH.DATA, "Scan2CAD_dataset") # TODO change this
+CONF.PATH.SCAN2CAD = os.path.join(CONF.PATH.DATA, "Scan2CAD_dataset") # DONE: its fine...
 
 # data
 CONF.SCANNET_DIR =  "/canis/Datasets/ScanNet/public/v2/scans" # TODO change this
