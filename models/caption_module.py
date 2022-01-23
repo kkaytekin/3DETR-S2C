@@ -9,20 +9,20 @@ sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
 from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.config import CONF
 from utils.box_util import box3d_iou_batch_tensor
+#debug
+import open3d as o3d
 
 # constants
 DC = ScannetDatasetConfig()
-
 def select_target(data_dict):
     # predicted bbox
     pred_bbox = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
+    pred_bbox = rotate_preds(pred_bbox)
     batch_size, num_proposals, _, _ = pred_bbox.shape
-
     # ground truth bbox
+    #gt_bbox = data_dict["gt_box_corners"] bu olmadı # batch_size, MAX_NUM_OBJ, 8, 3
     gt_bbox = data_dict["ref_box_corner_label"] # batch_size, 8, 3
-    # debug: Check if all objects have the same locations.
-    # Answer: The dataset antonio sent has bboxes in different locations... Need larger batch
-    # print("Sum of gt_bbox corner locations:", torch.sum(gt_bbox))
+
 
     target_ids = []
     target_ious = []
@@ -41,6 +41,16 @@ def select_target(data_dict):
     target_ious = torch.FloatTensor(target_ious).cuda() # batch_size
 
     return target_ids, target_ious
+
+def rotate_preds(pred_bbox):
+
+    out = pred_bbox.clone()
+    out[:,:,:,0] = pred_bbox[:,:,:,0]
+    out[:,:,:,1] = pred_bbox[:,:,:,2]
+    out[:,:,:,2] = -pred_bbox[:,:,:,1]
+
+    return out
+
 
 class SceneCaptionModule(nn.Module):
     def __init__(self, vocabulary, embeddings, emb_size=300, feat_size=128, hidden_size=512, num_proposals=256):
@@ -259,6 +269,73 @@ class TopDownSceneCaptionModule(nn.Module):
         )
         self.classifier = nn.Linear(hidden_size, self.num_vocabs)
 
+        #for drawing bboxes
+        self._plot_every = 1
+        self._iter_counter = 0
+
+
+
+    def _plot_bbox(self,data_dict, plot_every_iters = 10, plot_all_pred = True):
+
+        self._plot_every = plot_every_iters
+
+        pred_bbox = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
+        batch_size, num_proposals, _, _ = pred_bbox.shape
+        pred_bbox = rotate_preds(pred_bbox)
+
+        # ground truth bbox
+        #gt_bbox = data_dict["gt_box_corners"] bu olmadı # batch_size, MAX_NUM_OBJ, 8, 3
+        gt_bbox = data_dict["ref_box_corner_label"] # batch_size, 8, 3
+        if (self._iter_counter % self._plot_every == 0):
+            # Our lines span from points 0 to 1, 1 to 2, 2 to 3, etc...
+            lines = [[0, 1], [1, 2], [2, 3], [0, 3],
+                     [4, 5], [5, 6], [6, 7], [4, 7],
+                     [0, 4], [1, 5], [2, 6], [3, 7]]
+            geometries = []
+            pred_color = [[0, 0, 1] for _ in range(len(lines))]
+            gt_color = [[0, 1, 0] for _ in range(len(lines))]
+            if plot_all_pred:
+                for i in range(num_proposals):
+                    pred_box = pred_bbox[0,i,...].reshape(8,3).cpu().detach().numpy().astype(np.float64)
+                    PRED_box = o3d.geometry.LineSet(
+                        points = o3d.utility.Vector3dVector(pred_box),
+                        lines = o3d.utility.Vector2iVector(lines),
+                    )
+                    PRED_box.colors = o3d.utility.Vector3dVector(pred_color)
+                    geometries.append(PRED_box)
+            else: # plot only one pred_bbox
+                pred_box = pred_bbox[0,0,...].reshape(8,3).cpu().detach().numpy().astype(np.float64)
+                PRED_box = o3d.geometry.LineSet(
+                    points = o3d.utility.Vector3dVector(pred_box),
+                    lines = o3d.utility.Vector2iVector(lines),
+                )
+                PRED_box.colors = o3d.utility.Vector3dVector(pred_color)
+                geometries.append(PRED_box)
+
+            gt_box = gt_bbox[0].squeeze(0).cpu().detach().numpy().astype(np.float64)
+            GT_box = o3d.geometry.LineSet(
+                points = o3d.utility.Vector3dVector(gt_box),
+                lines = o3d.utility.Vector2iVector(lines),
+            )
+            GT_box.colors = o3d.utility.Vector3dVector(gt_color)
+            geometries.append(GT_box)
+            # debug mode:
+            # scene id: 'scene0000_00'
+            # object id: 39
+            # object name: cabinet
+            #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0000_00/axis_aligned_scene.ply")
+            #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/data/scannet/scans/scene0000_00/scene0000_00_vh_clean_2.ply")
+            #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0004_00/axis_aligned_scene.ply")
+            pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0031_00/axis_aligned_scene.ply")
+
+
+            geometries.append(pcd)
+
+            coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.6, origin=[0, 0, 0])
+            geometries.append(coord_frame)
+            o3d.visualization.draw_geometries(geometries)
+        self._iter_counter += 1
+
     def _step(self, step_input, target_feat, obj_feats, hidden_1, hidden_2, object_masks):
         '''
             recurrent step
@@ -373,7 +450,9 @@ class TopDownSceneCaptionModule(nn.Module):
 
         return local_masks
 
-    def forward(self, data_dict, use_tf=True, is_eval=False, max_len=CONF.TRAIN.MAX_DES_LEN):
+    def forward(self, data_dict, use_tf=True, is_eval=False, debug = True, max_len=CONF.TRAIN.MAX_DES_LEN):
+        if debug:
+            self._plot_bbox(data_dict, plot_every_iters = 500)
         if not is_eval:
             data_dict = self._forward_sample_batch(data_dict, max_len)
         else:

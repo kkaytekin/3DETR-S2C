@@ -9,6 +9,9 @@ import os
 sys.path.append(os.path.join(os.getcwd(), os.pardir, "lib")) # HACK add the lib folder
 from lib.config import CONF
 from utils.box_util import get_3d_box
+#3detr
+from utils.box_util import (flip_axis_to_camera_np, flip_axis_to_camera_tensor,
+                            get_3d_box_batch_np, get_3d_box_batch_tensor)
 
 def in_hull(p, hull):
     from scipy.spatial import Delaunay
@@ -89,8 +92,8 @@ class ScannetDatasetConfig(object):
         self.nyu40id2class = self._get_nyu40id2class()
         self.mean_size_arr = np.load(os.path.join(CONF.PATH.SCANNET, 'meta_data/scannet_reference_means.npz'))['arr_0']
 
-        self.num_class = len(self.type2class.keys())
-        self.num_heading_bin = 1
+        self.num_class = len(self.type2class.keys()) #num_semcls in 3detr
+        self.num_heading_bin = 1 #num_angle_bin in 3detr
         self.num_size_cluster = len(self.type2class.keys())
 
         self.type_mean_size = {}
@@ -170,3 +173,13 @@ class ScannetDatasetConfig(object):
         obb[:, 3:6] = box_size
         obb[:, 6] = heading_angle*-1
         return obb
+
+    #3DETR
+    def box_parametrization_to_corners(self, box_center_unnorm, box_size, box_angle):
+        box_center_upright = flip_axis_to_camera_tensor(box_center_unnorm)
+        boxes = get_3d_box_batch_tensor(box_size, box_angle, box_center_upright)
+        return boxes
+    def box_parametrization_to_corners_np(self, box_center_unnorm, box_size, box_angle):
+        box_center_upright = flip_axis_to_camera_np(box_center_unnorm)
+        boxes = get_3d_box_batch_np(box_size, box_angle, box_center_upright)
+        return boxes

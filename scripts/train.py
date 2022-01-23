@@ -25,6 +25,7 @@ from lib.config import CONF
 from models.capnet import CapNet
 from scripts.eval_pretrained import SCANREFER_TRAIN
 from tridetr.models.model_3detr import build_3detr
+from tridetr.criterion import build_criterion
 
 # SCANREFER_DUMMY = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_dummy.json")))
 
@@ -127,6 +128,11 @@ def get_model(args, dataset, device):
 
     return model
 
+def get_tridetr_criterion(args, device, dataset_config):
+    tridetr_criterion = build_criterion(args, dataset_config)
+    tridetr_criterion.to(device)
+    return tridetr_criterion
+
 def get_num_params(model):
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     num_params = int(sum([np.prod(p.size()) for p in model_parameters]))
@@ -136,6 +142,7 @@ def get_num_params(model):
 def get_solver(args, dataset, dataloader):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = get_model(args, dataset["train"], device)
+    tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
     checkpoint_best = None
@@ -161,7 +168,7 @@ def get_solver(args, dataset, dataloader):
     BN_DECAY_RATE = 0.5 if args.no_caption else None
 
     solver = Solver(
-        model=model, 
+        model=model,
         device=device,
         config=DC, 
         dataset=dataset,
@@ -169,6 +176,7 @@ def get_solver(args, dataset, dataloader):
         optimizer=optimizer, 
         stamp=stamp, 
         val_step=args.val_step,
+        tridetr_criterion = tridetr_criterion,
         detection=not args.no_detection,
         caption=not args.no_caption, 
         orientation=args.use_orientation,
@@ -182,6 +190,7 @@ def get_solver(args, dataset, dataloader):
         checkpoint_best=checkpoint_best
     )
     num_params = get_num_params(model)
+    print("The model has ",num_params, " parameters.")
 
     return solver, num_params, root
 
@@ -219,9 +228,9 @@ def get_scanrefer(args):
         raise ValueError("Invalid dataset.")
 
     if args.debug:
-        scanrefer_train = [SCANREFER_TRAIN[0]]
-        scanrefer_eval_train = [SCANREFER_TRAIN[0]]
-        scanrefer_eval_val = [SCANREFER_TRAIN[0]]
+        scanrefer_train = [SCANREFER_TRAIN[1821]]
+        scanrefer_eval_train = [SCANREFER_TRAIN[1821]]
+        scanrefer_eval_val = [SCANREFER_TRAIN[1821]]
 
     if args.no_caption:
         train_scene_list = get_scannet_scene_list("train")
@@ -378,14 +387,14 @@ if __name__ == "__main__":
     parser.add_argument("--dec_dropout", default=0.1, type=float)
     parser.add_argument("--dec_nhead", default=4, type=int)
 
-    # ### MLP heads for predicting bounding boxes
-    # parser.add_argument("--mlp_dropout", default=0.3, type=float)
-    # parser.add_argument(
-    #     "--nsemcls",
-    #     default=-1,
-    #     type=int,
-    #     help="Number of semantic object classes. Can be inferred from dataset",
-    # )
+    ### MLP heads for predicting bounding boxes
+    parser.add_argument("--mlp_dropout", default=0.3, type=float)
+    parser.add_argument(
+        "--nsemcls",
+        default=-1,
+        type=int,
+        help="Number of semantic object classes. Can be inferred from dataset",
+    )
 
     ### Other model params
     parser.add_argument("--preenc_npoints", default=2048, type=int)
@@ -394,6 +403,24 @@ if __name__ == "__main__":
     )
     #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
     #parser.add_argument("--use_color", default=False, action="store_true")
+
+    ##### Set Loss #####
+    ### Matcher
+    parser.add_argument("--matcher_giou_cost", default=2, type=float)
+    parser.add_argument("--matcher_cls_cost", default=1, type=float)
+    parser.add_argument("--matcher_center_cost", default=0, type=float)
+    parser.add_argument("--matcher_objectness_cost", default=0, type=float)
+
+    ### Loss Weights
+    parser.add_argument("--loss_giou_weight", default=0, type=float)
+    parser.add_argument("--loss_sem_cls_weight", default=1, type=float)
+    parser.add_argument(
+        "--loss_no_object_weight", default=0.2, type=float
+    )  # "no object" or "background" class for detection
+    parser.add_argument("--loss_angle_cls_weight", default=0.1, type=float)
+    parser.add_argument("--loss_angle_reg_weight", default=0.5, type=float)
+    parser.add_argument("--loss_center_weight", default=5.0, type=float)
+    parser.add_argument("--loss_size_weight", default=1.0, type=float)
 
     args = parser.parse_args()
 

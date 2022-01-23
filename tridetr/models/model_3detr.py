@@ -56,7 +56,7 @@ class BoxProcessor(object):
         return angle
 
     def compute_objectness_and_cls_prob(self, cls_logits):
-        assert cls_logits.shape[-1] == self.dataset_config.num_semcls + 1
+        assert cls_logits.shape[-1] == self.dataset_config.num_class + 1
         cls_prob = torch.nn.functional.softmax(cls_logits, dim=-1)
         objectness_prob = 1 - cls_prob[..., -1]
         return cls_prob[..., :-1], objectness_prob
@@ -95,7 +95,7 @@ class Model3DETR(nn.Module):
         encoder_dim=256,
         decoder_dim=256,
         position_embedding="fourier",
-        #mlp_dropout=0.3,
+        mlp_dropout=0.3,
         num_queries=256,
     ):
         super().__init__()
@@ -129,11 +129,11 @@ class Model3DETR(nn.Module):
         )
         self.decoder = decoder
         # TODO: Not building mlp heads, will use ProposalModule feed forward
-        #self.build_mlp_heads(dataset_config, decoder_dim, mlp_dropout)
+        self.build_mlp_heads(dataset_config, decoder_dim, mlp_dropout)
 
         self.num_queries = num_queries
         # TODO: Not including box_processor, use ProposalModule instead.
-        # self.box_processor = BoxProcessor(dataset_config)
+        self.box_processor = BoxProcessor(dataset_config)
 
     def build_mlp_heads(self, dataset_config, decoder_dim, mlp_dropout):
         mlp_func = partial(
@@ -148,13 +148,14 @@ class Model3DETR(nn.Module):
 
         # Semantic class of the box
         # add 1 for background/not-an-object class
-        semcls_head = mlp_func(output_dim=dataset_config.num_semcls + 1)
+        semcls_head = mlp_func(output_dim=dataset_config.num_class + 1)
 
         # geometry of the box
         center_head = mlp_func(output_dim=3)
         size_head = mlp_func(output_dim=3)
-        angle_cls_head = mlp_func(output_dim=dataset_config.num_angle_bin)
-        angle_reg_head = mlp_func(output_dim=dataset_config.num_angle_bin)
+        angle_cls_head = mlp_func(output_dim=dataset_config.num_heading_bin)
+        angle_reg_head = mlp_func(output_dim=dataset_config.num_heading_bin)
+        bbox_feature_head = mlp_func(output_dim=128, dropout=0.1) # TODO: Hyperparameters, track
 
         mlp_heads = [
             ("sem_cls_head", semcls_head),
@@ -162,6 +163,7 @@ class Model3DETR(nn.Module):
             ("size_head", size_head),
             ("angle_cls_head", angle_cls_head),
             ("angle_residual_head", angle_reg_head),
+            ("bbox_feature", bbox_feature_head)
         ]
         self.mlp_heads = nn.ModuleDict(mlp_heads)
 
@@ -190,6 +192,10 @@ class Model3DETR(nn.Module):
     def run_encoder(self, point_clouds):
         xyz, features = self._break_up_pc(point_clouds)
         pre_enc_xyz, pre_enc_features, pre_enc_inds = self.pre_encoder(xyz, features)
+        # Rough correspondance to VoteNet is as follows:
+        # data_dict["seed_xyz"] = pre_enc_xyz
+        # data_dict["seed_inds"] = pre_enc_inds
+
         # xyz: batch x npoints x 3
         # features: batch x channel x npoints
         # inds: batch x npoints
@@ -240,6 +246,10 @@ class Model3DETR(nn.Module):
         angle_residual_normalized = self.mlp_heads["angle_residual_head"](
             box_features
         ).transpose(1, 2)
+        # Only use final decoder to extract bbox_features # TODO: Ablation study, use multiple decoders
+        # print("bbox feature input dim starts at: " , (num_layers-1)*batch)
+        bbox_features = self.mlp_heads["bbox_feature"](box_features[(num_layers-1)*batch:]).transpose(1,2)
+        # Expected output: B x nquires x 128
 
         # reshape outputs to num_layers x batch x nqueries x noutput
         cls_logits = cls_logits.reshape(num_layers, batch, num_queries, -1)
@@ -294,6 +304,17 @@ class Model3DETR(nn.Module):
                 "sem_cls_prob": semcls_prob,
                 "box_corners": box_corners,
             }
+
+            if l == num_layers - 1 :
+                box_prediction["bbox_features"] = bbox_features
+                ## This is the same calculation as in scan2cap. But above we have softmaxed values so lets use them.
+                # TODO: Check which is better
+                # negative_score = cls_logits[l][...,-1]
+                # positive_score = 1 - negative_score
+                # objectness_scores = torch.cat((negative_score.unsqueeze(-1),positive_score.unsqueeze(-1)), dim=-1)
+                # box_prediction["bbox_mask"] = objectness_scores.argmax(-1)
+                box_prediction["bbox_mask"] = (objectness_prob > 0.5) * 1 # *1 converts boolean to int
+                box_prediction["query_xyz"] = query_xyz
             outputs.append(box_prediction)
 
         # intermediate decoder layer outputs are only used during training
@@ -319,12 +340,6 @@ class Model3DETR(nn.Module):
         if encoder_only:
             # return: batch x npoints x channels
             return enc_xyz, enc_features.transpose(0, 1)
-        # TODO: Either put these hyperparameters into data_dict as initial input,
-        #  set them within fwd pass, or handle them within get_query_embeddings().
-        #  I checked if its possible to pass them into parser; but they are calculated
-        #  data_dict, or calculate them during fwd. pass. There might be some related
-        #  within dataloader. So either modify current dataloader to have them within
-        #  arguments at parser. Check them and implement them jointly.
 
         point_cloud_dims = [
             inputs["point_cloud_dims_min"],
@@ -341,12 +356,11 @@ class Model3DETR(nn.Module):
         box_features = self.decoder(
             tgt, enc_features, query_pos=query_embed, pos=enc_pos
         )[0]
-        # TODO: Handle the following within proposal module.
-        # box_predictions = self.get_box_predictions(
-        #     query_xyz, point_cloud_dims, box_features
-        # )
-        #return box_predictions
-        return query_xyz, box_features
+
+        box_predictions = self.get_box_predictions(
+            query_xyz, point_cloud_dims, box_features
+        )
+        return box_predictions
 
 def build_preencoder(args):
     mlp_dims = [3 * int(args.use_color), 64, 128, args.enc_dim]

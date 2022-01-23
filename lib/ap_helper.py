@@ -54,11 +54,13 @@ def parse_predictions(end_points, config_dict):
             where pred_list_i = [(pred_sem_cls, box_params, box_score)_j]
             where j = 0, ..., num of valid detections - 1 from sample input i
     """
-    pred_center = end_points['center'] # B,num_proposal,3
-    pred_heading_class = torch.argmax(end_points['heading_scores'], -1) # B,num_proposal
-    pred_heading_residual = torch.gather(end_points['heading_residuals'], 2,
+    box_preds = end_points['box_predictions']["outputs"]
+    pred_center = box_preds["center_unnormalized"] # B,num_proposal,3
+    pred_heading_class = torch.argmax(box_preds['angle_logits'], -1) # B,num_proposal
+    pred_heading_residual = torch.gather(box_preds["angle_residual"], 2,
         pred_heading_class.unsqueeze(-1)) # B,num_proposal,1
     pred_heading_residual.squeeze_(2)
+    # asagidaki 3detr'da yok.
     pred_size_class = torch.argmax(end_points['size_scores'], -1) # B,num_proposal
     pred_size_residual = torch.gather(end_points['size_residuals'], 2,
         pred_size_class.unsqueeze(-1).unsqueeze(-1).repeat(1,1,1,3)) # B,num_proposal,1,3

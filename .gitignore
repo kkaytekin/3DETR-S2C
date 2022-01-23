@@ -66,3 +66,9 @@ data/.DS_Store
 # IDE
 .vscode
 .idea
+
+#3DETR Generated Files
+# generated files
+utils/box_intersection.c
+utils/*so
+utils/build/*

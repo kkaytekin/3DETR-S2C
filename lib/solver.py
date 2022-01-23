@@ -16,6 +16,7 @@ from torch.optim.lr_scheduler import StepLR, MultiStepLR
 sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 from lib.config import CONF
 from lib.loss_helper import get_scene_cap_loss
+from lib.loss_helper import get_detr_and_cap_loss
 from lib.eval_helper import eval_cap
 from utils.eta import decode_eta
 from lib.pointnet2.pytorch_utils import BNMomentumScheduler
@@ -27,8 +28,12 @@ ITER_REPORT_TEMPLATE = """
 [loss] train_cap_loss: {train_cap_loss}
 [loss] train_ori_loss: {train_ori_loss}
 [loss] train_dist_loss: {train_dist_loss}
-[loss] train_objectness_loss: {train_objectness_loss}
-[loss] train_box_loss: {train_box_loss}
+[loss] train_cls_loss: {train_cls_loss}
+[loss] train_angle_cls_loss: {train_angle_cls_loss}
+[loss] train_angle_reg_loss: {train_angle_reg_loss}
+[loss] center_loss: {center_loss}
+[loss] size_loss: {size_loss}
+[loss] cardinality_loss: {cardinality_loss}
 [sco.] train_cap_acc: {train_cap_acc}
 [sco.] train_ori_acc: {train_ori_acc}
 [sco.] train_obj_acc: {train_obj_acc}
@@ -73,11 +78,12 @@ BEST_REPORT_TEMPLATE = """
 """
 
 class Solver():
-    def __init__(self, model, device, config, dataset, dataloader, optimizer, stamp, val_step=10, 
+    def __init__(self, model, device, config, dataset, dataloader, optimizer, stamp, tridetr_criterion, val_step=10,
     detection=True, caption=True, orientation=False, distance=False, use_tf=True,
     lr_decay_step=None, lr_decay_rate=None, bn_decay_step=None, bn_decay_rate=None,
     criterion="meteor", checkpoint_best=None):
 
+        self.tridetr_criterion = tridetr_criterion
         self.epoch = 0                    # set in __call__
         self.verbose = 0                  # set in __call__
         
@@ -223,9 +229,15 @@ class Solver():
                 "cap_loss": [],
                 "ori_loss": [],
                 "dist_loss": [],
-                "objectness_loss": [],
+                #"objectness_loss": [],
                 #"vote_loss": [],
-                "box_loss": [],
+                #"box_loss": [],
+                "cls_loss": [],
+                "angle_cls_loss": [],
+                "angle_reg_loss": [],
+                "center_loss": [],
+                "size_loss": [],
+                "cardinality_loss": [],
                 # scores (float, not torch.cuda.FloatTensor)
                 "lang_acc": [],
                 "cap_acc": [],
@@ -258,9 +270,19 @@ class Solver():
     def _dump_log(self, phase, is_eval=False):
         if phase == "train" and not is_eval:
             log = {
-                "loss": ["loss", "cap_loss", "ori_loss", "dist_loss", "objectness_loss",
-                         #"vote_loss",
-                         "box_loss"],
+                "loss": ["loss",
+                        "cap_loss",
+                        "ori_loss",
+                        "dist_loss",
+                        #"objectness_loss": 0,
+                        #"vote_loss": 0,
+                        #"box_loss": 0,
+                        "cls_loss",
+                        "angle_cls_loss",
+                        "angle_reg_loss",
+                        "center_loss",
+                        "size_loss",
+                        "cardinality_loss",],
                 "score": ["lang_acc", "cap_acc", "ori_acc", "obj_acc", "pred_ious", "pos_ratio", "neg_ratio"]
             }
             for key in log:
@@ -303,11 +325,14 @@ class Solver():
         self.optimizer.step()
 
     def _compute_loss(self, data_dict):
-        data_dict = get_scene_cap_loss(
+
+        data_dict = get_detr_and_cap_loss(
+        #data_dict = get_scene_cap_loss(
             data_dict=data_dict, 
             device=self.device,
             config=self.config, 
             weights=self.dataset["train"].weights,
+            tridetrcriterion = self.tridetr_criterion,
             detection=self.detection,
             caption=self.caption,
             orientation=self.orientation,
@@ -315,25 +340,35 @@ class Solver():
         )
 
         # store loss
+        #s2c
         self._running_log["cap_loss"] = data_dict["cap_loss"]
         self._running_log["ori_loss"] = data_dict["ori_loss"]
         self._running_log["dist_loss"] = data_dict["dist_loss"]
-        self._running_log["objectness_loss"] = data_dict["objectness_loss"]
-        #self._running_log["vote_loss"] = data_dict["vote_loss"]
-        self._running_log["box_loss"] = data_dict["box_loss"]
+        #3detr
+        self._running_log["cls_loss"] = data_dict["loss_sem_cls"]
+        self._running_log["angle_cls_loss"] = data_dict["loss_angle_cls"]
+        self._running_log["angle_reg_loss"] = data_dict["loss_angle_reg"]
+        self._running_log["center_loss"] = data_dict["loss_center"]
+        self._running_log["size_loss"] = data_dict["loss_size"]
+        self._running_log["cardinality_loss"] = data_dict["loss_cardinality"]
+        # self._running_log["objectness_loss"] = data_dict["objectness_loss"]
+        # #self._running_log["vote_loss"] = data_dict["vote_loss"]
+        # self._running_log["box_loss"] = data_dict["box_loss"]
         self._running_log["loss"] = data_dict["loss"]
 
         # store eval
         self._running_log["cap_acc"] = data_dict["cap_acc"].item()
         self._running_log["ori_acc"] = data_dict["ori_acc"].item()
         self._running_log["pred_ious"] = data_dict["pred_ious"].item()
-        self._running_log["obj_acc"] = data_dict["obj_acc"].item()
-        self._running_log["pos_ratio"] = data_dict["pos_ratio"].item()
-        self._running_log["neg_ratio"] = data_dict["neg_ratio"].item()
+        # self._running_log["obj_acc"] = data_dict["obj_acc"].item()
+        # self._running_log["pos_ratio"] = data_dict["pos_ratio"].item()
+        # self._running_log["neg_ratio"] = data_dict["neg_ratio"].item()
 
 
     def _eval(self, phase):
-        if self.caption:
+        #TODO: original: if self.caption:
+        #   return to normal after debug
+        if not self.caption:
             bleu, cider, rouge, meteor = eval_cap(
                 model=self.model,
                 device=self.device,
@@ -341,6 +376,8 @@ class Solver():
                 dataloader=self.dataloader["eval"][phase],
                 phase=phase,
                 folder=self.stamp,
+                config=self.config,
+                tridetrcriterion = self.tridetr_criterion,
                 use_tf=False,
                 max_len=CONF.TRAIN.MAX_DES_LEN,
                 force=True,
@@ -379,7 +416,6 @@ class Solver():
             for data_dict in dataloader:
                 # move to cuda
                 for key in data_dict:
-                    #data_dict[key] = data_dict[key].cuda()
                     data_dict[key] = data_dict[key].to(self.device)
 
                 # initialize the running loss
@@ -389,9 +425,15 @@ class Solver():
                     "cap_loss": 0,
                     "ori_loss": 0,
                     "dist_loss": 0,
-                    "objectness_loss": 0,
+                    #"objectness_loss": 0,
                     #"vote_loss": 0,
-                    "box_loss": 0,
+                    #"box_loss": 0,
+                    "cls_loss": 0,
+                    "angle_cls_loss":0,
+                    "angle_reg_loss":0,
+                    "center_loss":0,
+                    "size_loss":0,
+                    "cardinality_loss":0,
                     # acc
                     "lang_acc": 0,
                     "cap_acc": 0,
@@ -426,17 +468,23 @@ class Solver():
                 self.log[phase]["cap_loss"].append(self._running_log["cap_loss"].item())
                 self.log[phase]["ori_loss"].append(self._running_log["ori_loss"].item())
                 self.log[phase]["dist_loss"].append(self._running_log["dist_loss"].item())
-                self.log[phase]["objectness_loss"].append(self._running_log["objectness_loss"].item())
+                # self.log[phase]["objectness_loss"].append(self._running_log["objectness_loss"].item())
                 #self.log[phase]["vote_loss"].append(self._running_log["vote_loss"].item())
-                self.log[phase]["box_loss"].append(self._running_log["box_loss"].item())
+                # self.log[phase]["box_loss"].append(self._running_log["box_loss"].item())
+                self.log[phase]["cls_loss"].append(self._running_log["cls_loss"].item())
+                self.log[phase]["angle_cls_loss"].append(self._running_log["angle_cls_loss"].item())
+                self.log[phase]["angle_reg_loss"].append(self._running_log["angle_reg_loss"].item())
+                self.log[phase]["center_loss"].append(self._running_log["center_loss"].item())
+                self.log[phase]["size_loss"].append(self._running_log["size_loss"].item())
+                self.log[phase]["cardinality_loss"].append(self._running_log["cardinality_loss"].item())
 
                 self.log[phase]["lang_acc"].append(self._running_log["lang_acc"])
                 self.log[phase]["cap_acc"].append(self._running_log["cap_acc"])
                 self.log[phase]["ori_acc"].append(self._running_log["ori_acc"])
-                self.log[phase]["obj_acc"].append(self._running_log["obj_acc"])
+                # self.log[phase]["obj_acc"].append(self._running_log["obj_acc"])
                 self.log[phase]["pred_ious"].append(self._running_log["pred_ious"])
-                self.log[phase]["pos_ratio"].append(self._running_log["pos_ratio"])
-                self.log[phase]["neg_ratio"].append(self._running_log["neg_ratio"])             
+                # self.log[phase]["pos_ratio"].append(self._running_log["pos_ratio"])
+                # self.log[phase]["neg_ratio"].append(self._running_log["neg_ratio"])
 
                 # report
                 if phase == "train":
@@ -548,9 +596,15 @@ class Solver():
             train_cap_loss=round(np.mean([v for v in self.log["train"]["cap_loss"]]), 5),
             train_ori_loss=round(np.mean([v for v in self.log["train"]["ori_loss"]]), 5),
             train_dist_loss=round(np.mean([v for v in self.log["train"]["dist_loss"]]), 5),
-            train_objectness_loss=round(np.mean([v for v in self.log["train"]["objectness_loss"]]), 5),
+            #train_objectness_loss=round(np.mean([v for v in self.log["train"]["objectness_loss"]]), 5),
             #train_vote_loss=round(np.mean([v for v in self.log["train"]["vote_loss"]]), 5),
-            train_box_loss=round(np.mean([v for v in self.log["train"]["box_loss"]]), 5),
+            #train_box_loss=round(np.mean([v for v in self.log["train"]["box_loss"]]), 5),
+            train_cls_loss=round(np.mean([v for v in self.log["train"]["cls_loss"]]), 5),
+            train_angle_cls_loss=round(np.mean([v for v in self.log["train"]["angle_cls_loss"]]), 5),
+            train_angle_reg_loss=round(np.mean([v for v in self.log["train"]["angle_reg_loss"]]), 5),
+            center_loss=round(np.mean([v for v in self.log["train"]["center_loss"]]), 5),
+            size_loss=round(np.mean([v for v in self.log["train"]["size_loss"]]), 5),
+            cardinality_loss=round(np.mean([v for v in self.log["train"]["cardinality_loss"]]), 5),
             train_cap_acc=round(np.mean([v for v in self.log["train"]["cap_acc"]]), 5),
             train_ori_acc=round(np.mean([v for v in self.log["train"]["ori_acc"]]), 5),
             train_obj_acc=round(np.mean([v for v in self.log["train"]["obj_acc"]]), 5),

@@ -15,6 +15,7 @@ from lib.ap_helper import parse_predictions
 from lib.loss import SoftmaxRankingLoss
 from utils.box_util import get_3d_box, get_3d_box_batch, box3d_iou, box3d_iou_batch
 from lib.config import CONF
+from tridetr.utils.dist import reduce_dict
 
 # FAR_THRESHOLD = 0.6
 # NEAR_THRESHOLD = 0.3
@@ -382,6 +383,85 @@ def compute_object_cls_loss(data_dict, weights):
     cls_acc = (preds == targets).sum().float() / targets.shape[0]
 
     return cls_loss, cls_acc
+
+# The main loss calculation function
+def get_detr_and_cap_loss(data_dict, device, config, weights, tridetrcriterion,
+    detection=True, caption=True, orientation=False, distance=False, num_bins=CONF.TRAIN.NUM_BINS):
+    """ Loss functions
+
+    Args:
+        data_dict: dict
+        config: dataset config instance
+        reference: flag (False/True)
+    Returns:
+        loss: pytorch scalar tensor
+        data_dict: dict
+    """
+    detection_coeff = 1
+    cap_coeff = 1
+    ori_coeff = 1
+    dist_coeff = 1
+    loss = 0.0
+    # Obj loss
+    if detection:
+        # criterion(outputs, targets). TODO: If time left, make data dict leaner here. it expects only GT info.
+        loss , loss_dict = tridetrcriterion(data_dict["box_predictions"], data_dict)
+        loss = detection_coeff * loss
+        loss_dict_reduced = reduce_dict(loss_dict)
+        for key in loss_dict_reduced:
+            data_dict[key] = loss_dict[key]
+
+
+
+    if caption:
+        cap_loss, cap_acc = compute_cap_loss(data_dict, config, weights)
+        # store
+        data_dict["cap_loss"] = cap_loss
+        data_dict["cap_acc"] = cap_acc
+
+        loss += cap_coeff * data_dict["cap_loss"]
+    else:
+        # store
+        data_dict["cap_loss"] = torch.zeros(1)[0].to(device)
+        data_dict["cap_acc"] = torch.zeros(1)[0].to(device)
+        data_dict["pred_ious"] =  torch.zeros(1)[0].to(device)
+
+    if orientation:
+        # Associate proposal and GT objects by point-to-point distances
+        #aggregated_vote_xyz = data_dict["aggregated_vote_xyz"]
+        query_xyz = data_dict["query_xyz"]
+        gt_center = data_dict["gt_box_centers"][:,:,0:3]
+        B = gt_center.shape[0]
+        K = query_xyz.shape[1]
+        K2 = gt_center.shape[1]
+        dist1, ind1, dist2, _ = nn_distance(query_xyz, gt_center) # dist1: BxK, dist2: BxK2
+        data_dict["object_assignment"] = ind1 # (B,K) with values in 0,1,...,K2-1
+
+        ori_loss, ori_acc = compute_node_orientation_loss(data_dict, num_bins)
+
+        # store
+        data_dict["ori_loss"] = ori_loss
+        data_dict["ori_acc"] = ori_acc
+
+        loss += ori_coeff * data_dict["ori_loss"]
+    else:
+        # store
+        data_dict["ori_loss"] = torch.zeros(1)[0].to(device)
+        data_dict["ori_acc"] = torch.zeros(1)[0].to(device)
+
+    if distance:
+        dist_loss = compute_node_distance_loss(data_dict)
+
+        # store
+        data_dict["dist_loss"] = dist_loss
+        loss += dist_coeff * data_dict["dist_loss"]
+    else:
+        # store
+        data_dict["dist_loss"] = torch.zeros(1)[0].to(device)
+
+    data_dict["loss"] = loss
+
+    return data_dict
 
 # The main loss calculation function
 def get_scene_cap_loss(data_dict, device, config, weights,

@@ -22,7 +22,7 @@ import lib.capeval.meteor.meteor as capmeteor
 from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.config import CONF
 from lib.ap_helper import parse_predictions
-from lib.loss_helper import get_scene_cap_loss, get_object_cap_loss
+from lib.loss_helper import get_scene_cap_loss, get_object_cap_loss, get_detr_and_cap_loss
 from utils.box_util import box3d_iou_batch_tensor
 
 # constants
@@ -156,7 +156,7 @@ def decode_targets(data_dict):
 
     return bbox_corners
 
-def feed_scene_cap(model, device, dataset, dataloader, phase, folder, 
+def feed_scene_cap(model, device, dataset, dataloader, phase, folder, config , tridetrcriterion,
     use_tf=False, is_eval=True, max_len=CONF.TRAIN.MAX_DES_LEN, save_interm=False, min_iou=CONF.EVAL.MIN_IOU_THRESHOLD, organized=SCANREFER_ORGANIZED):
     candidates = {}
     intermediates = {}
@@ -167,8 +167,17 @@ def feed_scene_cap(model, device, dataset, dataloader, phase, folder,
 
         with torch.no_grad():
             data_dict = model(data_dict, use_tf, is_eval)
-            data_dict = get_scene_cap_loss(data_dict, device, DC, weights=dataset.weights, detection=True, caption=False)
-
+            #data_dict = get_scene_cap_loss(data_dict, device, DC, weights=dataset.weights, detection=True, caption=False)
+            data_dict = get_detr_and_cap_loss(
+            #data_dict = get_scene_cap_loss(
+                data_dict=data_dict,
+                device=device,
+                config=config,
+                weights=dataset.weights,
+                tridetrcriterion = tridetrcriterion,
+                detection=True,
+                caption=False,
+            )
         # unpack
         captions = data_dict["lang_cap"].argmax(-1) # batch_size, num_proposals, max_len - 1
         dataset_ids = data_dict["dataset_idx"]
@@ -188,91 +197,91 @@ def feed_scene_cap(model, device, dataset, dataloader, phase, folder,
         }
 
         # nms mask
-        _ = parse_predictions(data_dict, POST_DICT)
-        nms_masks = torch.LongTensor(data_dict["pred_mask"]).cuda()
+        #_ = parse_predictions(data_dict, POST_DICT)
+        #nms_masks = torch.LongTensor(data_dict["pred_mask"]).cuda()
 
         # objectness mask
-        obj_masks = torch.argmax(data_dict["objectness_scores"], 2).long()
+        #obj_masks = torch.argmax(data_dict["objectness_scores"], 2).long()
 
         # final mask
-        nms_masks = nms_masks * obj_masks
+        #nms_masks = nms_masks * obj_masks
 
         # pick out object ids of detected objects
-        detected_object_ids = torch.gather(data_dict["scene_object_ids"], 1, data_dict["object_assignment"])
-
-        # bbox corners
-        assigned_target_bbox_corners = torch.gather(
-            data_dict["gt_box_corner_label"], 
-            1, 
-            data_dict["object_assignment"].view(batch_size, num_proposals, 1, 1).repeat(1, 1, 8, 3)
-        ) # batch_size, num_proposals, 8, 3
-        detected_bbox_corners = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
-        detected_bbox_centers = data_dict["center"] # batch_size, num_proposals, 3
-        
-        # compute IoU between each detected box and each ground truth box
-        ious = box3d_iou_batch_tensor(
-            assigned_target_bbox_corners.view(-1, 8, 3), # batch_size * num_proposals, 8, 3
-            detected_bbox_corners.view(-1, 8, 3) # batch_size * num_proposals, 8, 3
-        ).view(batch_size, num_proposals)
-        
-        # find good boxes (IoU > threshold)
-        good_bbox_masks = ious > min_iou # batch_size, num_proposals
-
-        # dump generated captions
-        object_attn_masks = {}
-        for batch_id in range(batch_size):
-            dataset_idx = dataset_ids[batch_id].item()
-            scene_id = dataset.scanrefer[dataset_idx]["scene_id"]
-            object_attn_masks[scene_id] = np.zeros((num_proposals, num_proposals))
-            for prop_id in range(num_proposals):
-                if nms_masks[batch_id, prop_id] == 1 and good_bbox_masks[batch_id, prop_id] == 1:
-                    object_id = str(detected_object_ids[batch_id, prop_id].item())
-                    caption_decoded = decode_caption(captions[batch_id, prop_id], dataset.vocabulary["idx2word"])
-
-                    # print(scene_id, object_id)
-                    try:
-                        ann_list = list(organized[scene_id][object_id].keys())
-                        object_name = organized[scene_id][object_id][ann_list[0]]["object_name"]
-
-                        # store
-                        key = "{}|{}|{}".format(scene_id, object_id, object_name)
-                        # key = "{}|{}".format(scene_id, object_id)
-                        candidates[key] = [caption_decoded]
-
-                        if save_interm:
-                            if scene_id not in intermediates: intermediates[scene_id] = {}
-                            if object_id not in intermediates[scene_id]: intermediates[scene_id][object_id] = {}
-
-                            intermediates[scene_id][object_id]["object_name"] = object_name
-                            intermediates[scene_id][object_id]["box_corner"] = detected_bbox_corners[batch_id, prop_id].cpu().numpy().tolist()
-                            intermediates[scene_id][object_id]["description"] = caption_decoded
-                            intermediates[scene_id][object_id]["token"] = caption_decoded.split(" ")
-
-                            # attention context
-                            # extract attention masks for each object
-                            object_attn_weights = data_dict["topdown_attn"][:, :, :num_proposals] # NOTE only consider attention on objects
-                            valid_context_masks = data_dict["valid_masks"][:, :, :num_proposals] # NOTE only consider attention on objects
-
-                            cur_valid_context_masks = valid_context_masks[batch_id, prop_id] # num_proposals
-                            cur_context_box_corners = detected_bbox_corners[batch_id, cur_valid_context_masks == 1] # X, 8, 3
-                            cur_object_attn_weights = object_attn_weights[batch_id, prop_id, cur_valid_context_masks == 1] # X
-
-                            intermediates[scene_id][object_id]["object_attn_weight"] = cur_object_attn_weights.cpu().numpy().T.tolist()
-                            intermediates[scene_id][object_id]["object_attn_context"] = cur_context_box_corners.cpu().numpy().tolist()
-
-                        # cache
-                        object_attn_masks[scene_id][prop_id, prop_id] = 1
-                    except KeyError:
-                        continue
-
-    # detected boxes
-    if save_interm:
-        print("saving intermediate results...")
-        interm_path = os.path.join(CONF.PATH.OUTPUT, folder, "interm.json")
-        with open(interm_path, "w") as f:
-            json.dump(intermediates, f, indent=4)
-
-    return candidates
+    #     detected_object_ids = torch.gather(data_dict["scene_object_ids"], 1, data_dict["object_assignment"])
+    #
+    #     # bbox corners
+    #     assigned_target_bbox_corners = torch.gather(
+    #         data_dict["gt_box_corner_label"],
+    #         1,
+    #         data_dict["object_assignment"].view(batch_size, num_proposals, 1, 1).repeat(1, 1, 8, 3)
+    #     ) # batch_size, num_proposals, 8, 3
+    #     detected_bbox_corners = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
+    #     detected_bbox_centers = data_dict["center"] # batch_size, num_proposals, 3
+    #
+    #     # compute IoU between each detected box and each ground truth box
+    #     ious = box3d_iou_batch_tensor(
+    #         assigned_target_bbox_corners.view(-1, 8, 3), # batch_size * num_proposals, 8, 3
+    #         detected_bbox_corners.view(-1, 8, 3) # batch_size * num_proposals, 8, 3
+    #     ).view(batch_size, num_proposals)
+    #
+    #     # find good boxes (IoU > threshold)
+    #     good_bbox_masks = ious > min_iou # batch_size, num_proposals
+    #
+    #     # dump generated captions
+    #     object_attn_masks = {}
+    #     for batch_id in range(batch_size):
+    #         dataset_idx = dataset_ids[batch_id].item()
+    #         scene_id = dataset.scanrefer[dataset_idx]["scene_id"]
+    #         object_attn_masks[scene_id] = np.zeros((num_proposals, num_proposals))
+    #         for prop_id in range(num_proposals):
+    #             if nms_masks[batch_id, prop_id] == 1 and good_bbox_masks[batch_id, prop_id] == 1:
+    #                 object_id = str(detected_object_ids[batch_id, prop_id].item())
+    #                 caption_decoded = decode_caption(captions[batch_id, prop_id], dataset.vocabulary["idx2word"])
+    #
+    #                 # print(scene_id, object_id)
+    #                 try:
+    #                     ann_list = list(organized[scene_id][object_id].keys())
+    #                     object_name = organized[scene_id][object_id][ann_list[0]]["object_name"]
+    #
+    #                     # store
+    #                     key = "{}|{}|{}".format(scene_id, object_id, object_name)
+    #                     # key = "{}|{}".format(scene_id, object_id)
+    #                     candidates[key] = [caption_decoded]
+    #
+    #                     if save_interm:
+    #                         if scene_id not in intermediates: intermediates[scene_id] = {}
+    #                         if object_id not in intermediates[scene_id]: intermediates[scene_id][object_id] = {}
+    #
+    #                         intermediates[scene_id][object_id]["object_name"] = object_name
+    #                         intermediates[scene_id][object_id]["box_corner"] = detected_bbox_corners[batch_id, prop_id].cpu().numpy().tolist()
+    #                         intermediates[scene_id][object_id]["description"] = caption_decoded
+    #                         intermediates[scene_id][object_id]["token"] = caption_decoded.split(" ")
+    #
+    #                         # attention context
+    #                         # extract attention masks for each object
+    #                         object_attn_weights = data_dict["topdown_attn"][:, :, :num_proposals] # NOTE only consider attention on objects
+    #                         valid_context_masks = data_dict["valid_masks"][:, :, :num_proposals] # NOTE only consider attention on objects
+    #
+    #                         cur_valid_context_masks = valid_context_masks[batch_id, prop_id] # num_proposals
+    #                         cur_context_box_corners = detected_bbox_corners[batch_id, cur_valid_context_masks == 1] # X, 8, 3
+    #                         cur_object_attn_weights = object_attn_weights[batch_id, prop_id, cur_valid_context_masks == 1] # X
+    #
+    #                         intermediates[scene_id][object_id]["object_attn_weight"] = cur_object_attn_weights.cpu().numpy().T.tolist()
+    #                         intermediates[scene_id][object_id]["object_attn_context"] = cur_context_box_corners.cpu().numpy().tolist()
+    #
+    #                     # cache
+    #                     object_attn_masks[scene_id][prop_id, prop_id] = 1
+    #                 except KeyError:
+    #                     continue
+    #
+    # # detected boxes
+    # if save_interm:
+    #     print("saving intermediate results...")
+    #     interm_path = os.path.join(CONF.PATH.OUTPUT, folder, "interm.json")
+    #     with open(interm_path, "w") as f:
+    #         json.dump(intermediates, f, indent=4)
+    #
+    # return candidates
 
 # def feed_oracle_cap(model, device, dataset, dataloader, phase, folder, use_tf=False, is_eval=True, max_len=CONF.TRAIN.MAX_DES_LEN):
 #     candidates = {}
@@ -385,7 +394,7 @@ def update_interm(interm, candidates, bleu, cider, rouge, meteor):
 
     return interm
 
-def eval_cap(model, device, dataset, dataloader, phase, folder, 
+def eval_cap(model, device, dataset, dataloader, phase, folder, config , tridetrcriterion,
     use_tf=False, is_eval=True, max_len=CONF.TRAIN.MAX_DES_LEN, force=False, 
     mode="scene", save_interm=False, no_caption=False, no_classify=False, min_iou=CONF.EVAL.MIN_IOU_THRESHOLD):
     if no_caption:
@@ -451,7 +460,7 @@ def eval_cap(model, device, dataset, dataloader, phase, folder,
         # generate results
         print("generating descriptions...")
         if mode == "scene":
-            candidates = feed_scene_cap(model, device, dataset, dataloader, phase, folder, use_tf, is_eval, max_len, save_interm, min_iou, organized=organized)
+            candidates = feed_scene_cap(model, device, dataset, dataloader, phase, folder, config , tridetrcriterion, use_tf, is_eval, max_len, save_interm, min_iou, organized=organized)
         elif mode == "object":
             candidates, cls_acc = feed_object_cap(model, device, dataset, dataloader, phase, folder, use_tf, is_eval, max_len)
         elif mode == "oracle":
