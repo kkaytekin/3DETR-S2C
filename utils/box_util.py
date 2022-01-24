@@ -342,7 +342,7 @@ def get_3d_box(box_size, heading_angle, center):
         output (8,3) array for 3D box cornders
         Similar to utils/compute_orientation_3d
     '''
-    R = roty(heading_angle)
+    R = roty(heading_angle) # R = I for scannet
     l,w,h = box_size
     # x_corners = [l/2,l/2,-l/2,-l/2,l/2,l/2,-l/2,-l/2]
     # y_corners = [h/2,h/2,h/2,h/2,-h/2,-h/2,-h/2,-h/2]
@@ -481,3 +481,43 @@ def get_3d_box_batch_tensor(box_size, angle, center):
     if reshape_final:
         corners_3d = corners_3d.reshape(bsize, nprop, 8, 3)
     return corners_3d
+
+def rotate_preds(pred_bbox):
+    # This is a workaround for caption loss iou check.
+    # caption loss "ref_box_corner_label" and "gt_box_centers" are ordered differently.
+    # here is gt label:
+    #      [[ 1.1901e+00, -1.1532e-01, -1.3514e+00],
+    #       [ 1.1901e+00, -1.1532e-01, -2.2510e+00],
+    #       [ 2.2729e-01, -1.1532e-01, -2.2510e+00],
+    #       [ 2.2729e-01, -1.1532e-01, -1.3514e+00],
+    #       [ 1.1901e+00, -5.9912e-01, -1.3514e+00],
+    #       [ 1.1901e+00, -5.9912e-01, -2.2510e+00],
+    #       [ 2.2729e-01, -5.9912e-01, -2.2510e+00],
+    #       [ 2.2729e-01, -5.9912e-01, -1.3514e+00]]]
+    # here is ref_box_corner_label
+    #     [[ 1.1901, -1.3514,  0.5991],
+    #      [ 1.1901, -2.2510,  0.5991],
+    #      [ 0.2273, -2.2510,  0.5991],
+    #      [ 0.2273, -1.3514,  0.5991],
+    #      [ 1.1901, -1.3514,  0.1153],
+    #      [ 1.1901, -2.2510,  0.1153],
+    #      [ 0.2273, -2.2510,  0.1153],
+    #      [ 0.2273, -1.3514,  0.1153]]
+
+    # below transform transforms the gt_bbox to exactly to the ref_box_corner label.
+    # calculated bboxes bboxes have perfect ious, which is used for language task.
+    # but when i plot the boxes, some of them are not boxes anymore.
+    # weird thing is, centers have the same coordinate system.
+    # out = pred_bbox.clone()
+    # out[:,[0,1,2,3],1] = out[:,[4,5,6,7],1]
+    # out[:,[4,5,6,7],1] = pred_bbox[:,[0,1,2,3],1]
+    # out[...,[0,1,2]] = out[...,[0,2,1]]
+    # out[..., 2] *= -1
+
+    # So i used the following, which gives the same iou vales but the first four elements
+    # in y axis are the ones in the last 4 axis.
+    out = pred_bbox.clone()
+    out[...,[0,1,2]] = out[...,[0,2,1]]
+    out[..., 2] *= -1
+
+    return out

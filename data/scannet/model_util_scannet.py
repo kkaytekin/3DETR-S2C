@@ -175,6 +175,7 @@ class ScannetDatasetConfig(object):
         return obb
 
     #3DETR
+    # flip_axis_to_camera is making everything flipped. why should it even help?
     def box_parametrization_to_corners(self, box_center_unnorm, box_size, box_angle):
         box_center_upright = flip_axis_to_camera_tensor(box_center_unnorm)
         boxes = get_3d_box_batch_tensor(box_size, box_angle, box_center_upright)

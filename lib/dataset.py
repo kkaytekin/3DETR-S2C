@@ -349,6 +349,7 @@ class ScannetReferenceDataset(ReferenceDataset):
         instance_labels = self.scene_data[scene_id]["instance_labels"]
         semantic_labels = self.scene_data[scene_id]["semantic_labels"]
         instance_bboxes = self.scene_data[scene_id]["instance_bboxes"]
+         # GT BBOXES = instance_bboxes
         # for instance_bboxes 3detr takes 7 dimensional input, we take 8 dimensional
         # ok
         if not self.use_color:
@@ -569,7 +570,10 @@ class ScannetReferenceDataset(ReferenceDataset):
         data_dict["ann_id"] = np.array(int(ann_id)).astype(np.int64)
         data_dict["object_cat"] = np.array(object_cat).astype(np.int64)
         data_dict["unique_multiple"] = np.array(self.unique_multiple_lookup[scene_id][str(object_id)][ann_id]).astype(np.int64)
+        # The following are the original bbox calculations. 3DETR ones are flipped.
+        # TODO: box3d_iou_batch_tensor() works well if the boxes are from the same dataset. extract ref_box_corner_label from 3detr as well. Do coordinate flipping only for plotting the results.
         data_dict["ref_box_corner_label"] = ref_box_corner_label.astype(np.float64) # target box corners NOTE type must be double
+        data_dict["gt_box_corner_label"] = gt_box_corner_label.astype(np.float64) # all GT box corners NOTE type must be double
         ## 3DETR
         data_dict["point_cloud_dims_min"] = point_cloud_dims_min.astype(np.float32)
         data_dict["point_cloud_dims_max"] = point_cloud_dims_max.astype(np.float32)
@@ -578,9 +582,13 @@ class ScannetReferenceDataset(ReferenceDataset):
 
         data_dict["gt_box_sem_cls_label"] = target_bboxes_semcls.astype(np.int64)
         data_dict["pcl_color"] = pcl_color
-        # / ok
+        # 3DETR BBOX'es.
         data_dict["gt_box_corners"] = box_corners.astype(np.float32)
         data_dict["gt_box_centers"] = box_centers.astype(np.float32)
+        # Just using S2C gt_boxes doesn't work.
+        # data_dict["gt_box_corners"] = data_dict["gt_box_corner_label"]
+        # data_dict["gt_box_centers"] = data_dict["center_label"]
+
         data_dict["gt_box_centers_normalized"] = box_centers_normalized.astype(
             np.float32
         )

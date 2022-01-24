@@ -13,7 +13,7 @@ sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 from utils.nn_distance import nn_distance, huber_loss
 from lib.ap_helper import parse_predictions
 from lib.loss import SoftmaxRankingLoss
-from utils.box_util import get_3d_box, get_3d_box_batch, box3d_iou, box3d_iou_batch
+from utils.box_util import get_3d_box, get_3d_box_batch, box3d_iou, box3d_iou_batch, rotate_preds
 from lib.config import CONF
 from tridetr.utils.dist import reduce_dict
 
@@ -87,7 +87,7 @@ def compute_objectness_loss(data_dict):
     """ 
     # Associate proposal and GT objects by point-to-point distances
     # aggregated_vote_xyz = data_dict["aggregated_vote_xyz"]
-    query_xyz = data_dict["query_xyz"]
+    query_xyz = data_dict["query_xyz"] # Wrong. Refer to full 3detr outputs
     gt_center = data_dict["center_label"][:,:,0:3]
     B = gt_center.shape[0]
     K = query_xyz.shape[1]
@@ -411,7 +411,31 @@ def get_detr_and_cap_loss(data_dict, device, config, weights, tridetrcriterion,
         for key in loss_dict_reduced:
             data_dict[key] = loss_dict[key]
 
+        # Calculate pos / neg ratio and objectness accuracy for logging
+        pred_center = data_dict["box_predictions"]["outputs"]["center_unnormalized"]
+        #pred_center = rotate_preds(pred_center)
+        gt_center = data_dict["center_label"][:,:,0:3]
+        B = gt_center.shape[0]
+        K = pred_center.shape[1]
+        K2 = gt_center.shape[1]
+        dist1, ind1, dist2, _ = nn_distance(pred_center, gt_center) # dist1: BxK, dist2: BxK2
+        euclidean_dist1 = torch.sqrt(dist1+1e-6)
+        objectness_label = torch.zeros((B,K), dtype=torch.long).cuda()
+        objectness_mask = torch.zeros((B,K)).cuda()
+        objectness_label[euclidean_dist1<NEAR_THRESHOLD] = 1
+        objectness_mask[euclidean_dist1<NEAR_THRESHOLD] = 1
+        objectness_mask[euclidean_dist1>FAR_THRESHOLD] = 1
 
+        #data_dict["objectness_label"] = objectness_label
+        #data_dict["objectness_mask"] = objectness_mask
+        data_dict["pos_ratio"] = torch.sum(objectness_label.float().to(device))/float(K)
+        data_dict["neg_ratio"] = torch.sum(objectness_mask.float())/float(K) - data_dict["pos_ratio"]
+        obj_pred_val = data_dict["bbox_mask"]
+        obj_acc = torch.sum((obj_pred_val==objectness_label.long()).float())/(K+1e-6)
+        data_dict["obj_acc"] = obj_acc
+
+        # used later in eval
+        data_dict["object_assignment"] = ind1
 
     if caption:
         cap_loss, cap_acc = compute_cap_loss(data_dict, config, weights)

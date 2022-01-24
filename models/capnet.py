@@ -117,7 +117,7 @@ class CapNet(nn.Module):
         """
         # --------- PROPOSAL GENERATION ---------
         # TODO: Debug here to see if the xyz
-        box_predictions = self.tridetr(data_dict,encoder_only)
+        box_predictions, box_features = self.tridetr(data_dict,encoder_only)
         # For the following modules
         data_dict["bbox_feature"] = box_predictions["outputs"]["bbox_features"]
         data_dict["bbox_mask"] = box_predictions["outputs"]["bbox_mask"]
@@ -126,7 +126,8 @@ class CapNet(nn.Module):
         data_dict["box_predictions"] = box_predictions
         data_dict["query_xyz"] = box_predictions["outputs"]["query_xyz"]
         # Process data_dict to incorporate necessary tridetr outputs.
-        #data_dict = self.proposal(xyz, features, data_dict)
+        # DEBUG
+        #data_dict = self.proposal(data_dict["query_xyz"], box_features, data_dict)
         #######################################
         #                                     #
         #           GRAPH ENHANCEMENT         #

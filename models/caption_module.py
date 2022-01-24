@@ -8,7 +8,7 @@ import numpy as np
 sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
 from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.config import CONF
-from utils.box_util import box3d_iou_batch_tensor
+from utils.box_util import box3d_iou_batch_tensor, rotate_preds
 #debug
 import open3d as o3d
 
@@ -22,7 +22,6 @@ def select_target(data_dict):
     # ground truth bbox
     #gt_bbox = data_dict["gt_box_corners"] bu olmadı # batch_size, MAX_NUM_OBJ, 8, 3
     gt_bbox = data_dict["ref_box_corner_label"] # batch_size, 8, 3
-
 
     target_ids = []
     target_ious = []
@@ -42,14 +41,7 @@ def select_target(data_dict):
 
     return target_ids, target_ious
 
-def rotate_preds(pred_bbox):
 
-    out = pred_bbox.clone()
-    out[:,:,:,0] = pred_bbox[:,:,:,0]
-    out[:,:,:,1] = pred_bbox[:,:,:,2]
-    out[:,:,:,2] = -pred_bbox[:,:,:,1]
-
-    return out
 
 
 class SceneCaptionModule(nn.Module):
@@ -108,20 +100,7 @@ class SceneCaptionModule(nn.Module):
         obj_feats = self.map_feat(obj_feats) # batch_size, num_proposals, emb_size
 
         # find the target object ids
-        # Consider the last decoder output when selecting the target.
-
-        num_decoders = data_dict['num_decoder_layers']
-        for i in range(num_decoders):
-            target_ids, target_ious = select_target(data_dict)
-            # NOTE when the IoU of best matching predicted boxes and the GT boxes
-            # are smaller than the threshold, the corresponding predicted captions
-            # should be filtered out in case the model learns wrong things
-            good_bbox_masks = target_ious > min_iou # batch_size
-            # good_bbox_masks = target_ious != 0 # batch_size
-            data_dict["decoder{}_proposal".format(i)]["good_bbox_masks"] = good_bbox_masks
-            if i == num_decoders - 1:
-                data_dict["good_bbox_masks"] = good_bbox_masks
-
+        target_ids, target_ious = select_target(data_dict)
 
         # select object features
         target_feats = torch.gather(
@@ -148,13 +127,19 @@ class SceneCaptionModule(nn.Module):
 
         outputs = torch.cat(outputs, dim=1) # batch_size, num_words - 1/max_len, num_vocabs
 
+        # NOTE when the IoU of best matching predicted boxes and the GT boxes
+        # are smaller than the threshold, the corresponding predicted captions
+        # should be filtered out in case the model learns wrong things
+        good_bbox_masks = target_ious > min_iou # batch_size
+        # good_bbox_masks = target_ious != 0 # batch_size
+
         num_good_bboxes = good_bbox_masks.sum()
         mean_target_ious = target_ious[good_bbox_masks].mean() if num_good_bboxes > 0 else torch.zeros(1)[0].cuda()
 
         # store
         data_dict["lang_cap"] = outputs
         data_dict["pred_ious"] = mean_target_ious
-
+        data_dict["good_bbox_masks"] = good_bbox_masks
 
         return data_dict
 
@@ -326,8 +311,8 @@ class TopDownSceneCaptionModule(nn.Module):
             #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0000_00/axis_aligned_scene.ply")
             #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/data/scannet/scans/scene0000_00/scene0000_00_vh_clean_2.ply")
             #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0004_00/axis_aligned_scene.ply")
+            # TODO: Ask - scene axes are different than GT and predicted axes. BBOX'es do not fit.
             pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0031_00/axis_aligned_scene.ply")
-
 
             geometries.append(pcd)
 
@@ -450,7 +435,7 @@ class TopDownSceneCaptionModule(nn.Module):
 
         return local_masks
 
-    def forward(self, data_dict, use_tf=True, is_eval=False, debug = True, max_len=CONF.TRAIN.MAX_DES_LEN):
+    def forward(self, data_dict, use_tf=True, is_eval=False, debug = False, max_len=CONF.TRAIN.MAX_DES_LEN):
         if debug:
             self._plot_bbox(data_dict, plot_every_iters = 500)
         if not is_eval:

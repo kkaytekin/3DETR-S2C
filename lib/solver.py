@@ -360,15 +360,13 @@ class Solver():
         self._running_log["cap_acc"] = data_dict["cap_acc"].item()
         self._running_log["ori_acc"] = data_dict["ori_acc"].item()
         self._running_log["pred_ious"] = data_dict["pred_ious"].item()
-        # self._running_log["obj_acc"] = data_dict["obj_acc"].item()
-        # self._running_log["pos_ratio"] = data_dict["pos_ratio"].item()
-        # self._running_log["neg_ratio"] = data_dict["neg_ratio"].item()
+        self._running_log["obj_acc"] = data_dict["obj_acc"].item()
+        self._running_log["pos_ratio"] = data_dict["pos_ratio"].item()
+        self._running_log["neg_ratio"] = data_dict["neg_ratio"].item()
 
 
     def _eval(self, phase):
-        #TODO: original: if self.caption:
-        #   return to normal after debug
-        if not self.caption:
+        if self.caption:
             bleu, cider, rouge, meteor = eval_cap(
                 model=self.model,
                 device=self.device,
@@ -481,10 +479,10 @@ class Solver():
                 self.log[phase]["lang_acc"].append(self._running_log["lang_acc"])
                 self.log[phase]["cap_acc"].append(self._running_log["cap_acc"])
                 self.log[phase]["ori_acc"].append(self._running_log["ori_acc"])
-                # self.log[phase]["obj_acc"].append(self._running_log["obj_acc"])
+                self.log[phase]["obj_acc"].append(self._running_log["obj_acc"])
                 self.log[phase]["pred_ious"].append(self._running_log["pred_ious"])
-                # self.log[phase]["pos_ratio"].append(self._running_log["pos_ratio"])
-                # self.log[phase]["neg_ratio"].append(self._running_log["neg_ratio"])
+                self.log[phase]["pos_ratio"].append(self._running_log["pos_ratio"])
+                self.log[phase]["neg_ratio"].append(self._running_log["neg_ratio"])
 
                 # report
                 if phase == "train":

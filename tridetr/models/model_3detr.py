@@ -360,7 +360,7 @@ class Model3DETR(nn.Module):
         box_predictions = self.get_box_predictions(
             query_xyz, point_cloud_dims, box_features
         )
-        return box_predictions
+        return box_predictions,  box_features
 
 def build_preencoder(args):
     mlp_dims = [3 * int(args.use_color), 64, 128, args.enc_dim]
