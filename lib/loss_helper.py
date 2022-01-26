@@ -428,10 +428,12 @@ def get_detr_and_cap_loss(data_dict, device, config, weights, tridetrcriterion,
 
         #data_dict["objectness_label"] = objectness_label
         #data_dict["objectness_mask"] = objectness_mask
-        data_dict["pos_ratio"] = torch.sum(objectness_label.float().to(device))/float(K)
-        data_dict["neg_ratio"] = torch.sum(objectness_mask.float())/float(K) - data_dict["pos_ratio"]
+
+        #TODO: Following values can go greater than 1 for batch_size > 1. Normalize to batch size?
+        data_dict["pos_ratio"] = torch.sum(objectness_label.float().to(device))/float(K*B)
+        data_dict["neg_ratio"] = torch.sum(objectness_mask.float())/float(K*B) - data_dict["pos_ratio"]
         obj_pred_val = data_dict["bbox_mask"]
-        obj_acc = torch.sum((obj_pred_val==objectness_label.long()).float())/(K+1e-6)
+        obj_acc = torch.sum((obj_pred_val==objectness_label.long()).float())/(K*B+1e-6)
         data_dict["obj_acc"] = obj_acc
 
         # used later in eval

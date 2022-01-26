@@ -453,6 +453,8 @@ class Solver():
 
                 # backward
                 start = time.time()
+                # TODO: Utilize detect_anomaly for pytorch 1.10.
+                #with torch.autograd.set_detect_anomaly(True):
                 self._backward()
                 self.log[phase]["backward"].append(time.time() - start)
                 
