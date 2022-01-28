@@ -405,11 +405,12 @@ def get_detr_and_cap_loss(data_dict, device, config, weights, tridetrcriterion,
     # Obj loss
     if detection:
         # criterion(outputs, targets). TODO: If time left, make data dict leaner here. it expects only GT info.
-        loss , loss_dict = tridetrcriterion(data_dict["box_predictions"], data_dict)
-        loss = detection_coeff * loss
-        loss_dict_reduced = reduce_dict(loss_dict)
-        for key in loss_dict_reduced:
-            data_dict[key] = loss_dict[key]
+        if tridetrcriterion is not None:
+            loss , loss_dict = tridetrcriterion(data_dict["box_predictions"], data_dict)
+            loss = detection_coeff * loss
+            loss_dict_reduced = reduce_dict(loss_dict)
+            for key in loss_dict_reduced:
+                data_dict[key] = loss_dict[key]
 
         # Calculate pos / neg ratio and objectness accuracy for logging
         pred_center = data_dict["box_predictions"]["outputs"]["center_unnormalized"]
