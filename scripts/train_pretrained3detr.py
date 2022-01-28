@@ -57,6 +57,7 @@ def get_dataloader(args, scanrefer, all_scene_list, split, config, augment, scan
 
 def get_model(args, dataset, device):
     # initiate model
+    # todo: get rid of input_channels here. we do it in build_encoder already. for pretrained version; we cannot use normal, height and color.
     input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
     tridetr , _ = build_3detr(args, dataset_config=DC)
     if not args.use_checkpoint:
@@ -68,8 +69,7 @@ def get_model(args, dataset, device):
         for k, v in tridetr.state_dict().items():
             if "mlp_heads.bbox_feature" in k:
                 sd["model"][k] = v
-
-    tridetr.load_state_dict(sd["model"])
+        tridetr.load_state_dict(sd["model"])
 
     model = CapNet(
         num_class=DC.num_class,

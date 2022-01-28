@@ -5,8 +5,8 @@ from functools import partial
 import numpy as np
 import torch
 import torch.nn as nn
-from lib.pointnet2.pointnet2_modules import PointnetSAModuleVotes
-from lib.pointnet2.pointnet2_utils import furthest_point_sample
+from tridetr.third_party.pointnet2.pointnet2_modules import PointnetSAModuleVotes
+from tridetr.third_party.pointnet2.pointnet2_utils import furthest_point_sample
 from tridetr.utils.pc_util import scale_points, shift_scale_points
 
 from tridetr.models.helpers import GenericMLP
@@ -212,7 +212,8 @@ class Model3DETR(nn.Module):
             enc_inds = pre_enc_inds
         else:
             # use gather here to ensure that it works for both FPS and random sampling
-            enc_inds = torch.gather(pre_enc_inds, 1, enc_inds)
+            # type cast for pytorch 1.8.0
+            enc_inds = torch.gather(pre_enc_inds, 1, enc_inds.type(torch.int64))
         return enc_xyz, enc_features, enc_inds
 
     def get_box_predictions(self, query_xyz, point_cloud_dims, box_features):
@@ -363,7 +364,8 @@ class Model3DETR(nn.Module):
         return box_predictions,  box_features
 
 def build_preencoder(args):
-    mlp_dims = [3 * int(args.use_color), 64, 128, args.enc_dim]
+    input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
+    mlp_dims = [input_channels, 64, 128, args.enc_dim]
     preencoder = PointnetSAModuleVotes(
         radius=0.2,
         nsample=64,

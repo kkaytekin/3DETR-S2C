@@ -389,7 +389,7 @@ class ScannetReferenceDataset(ReferenceDataset):
         ## ok
         target_bboxes = np.zeros((MAX_NUM_OBJ, 6))
         target_bboxes_mask = np.zeros((MAX_NUM_OBJ), dtype=np.float32)
-        angle_classes = np.zeros((MAX_NUM_OBJ,))
+        angle_classes = np.zeros((MAX_NUM_OBJ,), dtype=np.int64)
         angle_residuals = np.zeros((MAX_NUM_OBJ,))
         ## / ok
 

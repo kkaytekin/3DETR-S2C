@@ -345,15 +345,13 @@ class Solver():
         self._running_log["ori_loss"] = data_dict["ori_loss"]
         self._running_log["dist_loss"] = data_dict["dist_loss"]
         #3detr
-        self._running_log["cls_loss"] = data_dict["loss_sem_cls"]
-        self._running_log["angle_cls_loss"] = data_dict["loss_angle_cls"]
-        self._running_log["angle_reg_loss"] = data_dict["loss_angle_reg"]
-        self._running_log["center_loss"] = data_dict["loss_center"]
-        self._running_log["size_loss"] = data_dict["loss_size"]
-        self._running_log["cardinality_loss"] = data_dict["loss_cardinality"]
-        # self._running_log["objectness_loss"] = data_dict["objectness_loss"]
-        # #self._running_log["vote_loss"] = data_dict["vote_loss"]
-        # self._running_log["box_loss"] = data_dict["box_loss"]
+        if self.tridetr_criterion is not None:
+            self._running_log["cls_loss"] = data_dict["loss_sem_cls"]
+            self._running_log["angle_cls_loss"] = data_dict["loss_angle_cls"]
+            self._running_log["angle_reg_loss"] = data_dict["loss_angle_reg"]
+            self._running_log["center_loss"] = data_dict["loss_center"]
+            self._running_log["size_loss"] = data_dict["loss_size"]
+            self._running_log["cardinality_loss"] = data_dict["loss_cardinality"]
         self._running_log["loss"] = data_dict["loss"]
 
         # store eval
@@ -468,16 +466,13 @@ class Solver():
                 self.log[phase]["cap_loss"].append(self._running_log["cap_loss"].item())
                 self.log[phase]["ori_loss"].append(self._running_log["ori_loss"].item())
                 self.log[phase]["dist_loss"].append(self._running_log["dist_loss"].item())
-                # self.log[phase]["objectness_loss"].append(self._running_log["objectness_loss"].item())
-                #self.log[phase]["vote_loss"].append(self._running_log["vote_loss"].item())
-                # self.log[phase]["box_loss"].append(self._running_log["box_loss"].item())
-                self.log[phase]["cls_loss"].append(self._running_log["cls_loss"].item())
-                self.log[phase]["angle_cls_loss"].append(self._running_log["angle_cls_loss"].item())
-                self.log[phase]["angle_reg_loss"].append(self._running_log["angle_reg_loss"].item())
-                self.log[phase]["center_loss"].append(self._running_log["center_loss"].item())
-                self.log[phase]["size_loss"].append(self._running_log["size_loss"].item())
-                self.log[phase]["cardinality_loss"].append(self._running_log["cardinality_loss"].item())
-
+                if self.tridetr_criterion is not None:
+                    self.log[phase]["cls_loss"].append(self._running_log["cls_loss"].item())
+                    self.log[phase]["angle_cls_loss"].append(self._running_log["angle_cls_loss"].item())
+                    self.log[phase]["angle_reg_loss"].append(self._running_log["angle_reg_loss"].item())
+                    self.log[phase]["center_loss"].append(self._running_log["center_loss"].item())
+                    self.log[phase]["size_loss"].append(self._running_log["size_loss"].item())
+                    self.log[phase]["cardinality_loss"].append(self._running_log["cardinality_loss"].item())
                 self.log[phase]["lang_acc"].append(self._running_log["lang_acc"])
                 self.log[phase]["cap_acc"].append(self._running_log["cap_acc"])
                 self.log[phase]["ori_acc"].append(self._running_log["ori_acc"])

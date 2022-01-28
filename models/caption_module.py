@@ -32,7 +32,7 @@ def select_target(data_dict):
         ious = box3d_iou_batch_tensor(pred_bbox_batch, gt_bbox_batch)
         target_id = ious.argmax().item() # 0 ~ num_proposals - 1
         # debug
-        print("Max iou: ", ious[target_id])
+        #print("Max iou: ", ious[target_id])
         target_ids.append(target_id)
         target_ious.append(ious[target_id])
 
