@@ -273,6 +273,7 @@ def get_scanrefer(args):
     else:
         # get initial scene list
         train_scene_list = sorted(list(set([data["scene_id"] for data in scanrefer_train])))
+        eval_train_scene_list = sorted(list(set([data["scene_id"] for data in scanrefer_eval_train])))
         val_scene_list = sorted(list(set([data["scene_id"] for data in scanrefer_eval_val])))
 
         # filter data in chosen scenes
@@ -283,7 +284,7 @@ def get_scanrefer(args):
 
         # eval on train
         new_scanrefer_eval_train = []
-        for scene_id in train_scene_list:
+        for scene_id in eval_train_scene_list:
             data = deepcopy(SCANREFER_TRAIN[0])
             data["scene_id"] = scene_id
             new_scanrefer_eval_train.append(data)
