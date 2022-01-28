@@ -410,7 +410,9 @@ def get_detr_and_cap_loss(data_dict, device, config, weights, tridetrcriterion,
             loss = detection_coeff * loss
             loss_dict_reduced = reduce_dict(loss_dict)
             for key in loss_dict_reduced:
-                data_dict[key] = loss_dict[key]
+                #do not track all decoder losses
+                if not key[-1].isdigit():
+                    data_dict[key] = loss_dict[key]
 
         # Calculate pos / neg ratio and objectness accuracy for logging
         pred_center = data_dict["box_predictions"]["outputs"]["center_unnormalized"]
@@ -430,7 +432,7 @@ def get_detr_and_cap_loss(data_dict, device, config, weights, tridetrcriterion,
         #data_dict["objectness_label"] = objectness_label
         #data_dict["objectness_mask"] = objectness_mask
 
-        #TODO: Following values can go greater than 1 for batch_size > 1. Normalize to batch size?
+        #TODO: Following values are not calculated truly. Either get rid of them or fix
         data_dict["pos_ratio"] = torch.sum(objectness_label.float().to(device))/float(K*B)
         data_dict["neg_ratio"] = torch.sum(objectness_mask.float())/float(K*B) - data_dict["pos_ratio"]
         obj_pred_val = data_dict["bbox_mask"]
@@ -454,6 +456,7 @@ def get_detr_and_cap_loss(data_dict, device, config, weights, tridetrcriterion,
         data_dict["pred_ious"] =  torch.zeros(1)[0].to(device)
 
     if orientation:
+        # todo: check if we still need the below code:
         # Associate proposal and GT objects by point-to-point distances
         #aggregated_vote_xyz = data_dict["aggregated_vote_xyz"]
         query_xyz = data_dict["query_xyz"]

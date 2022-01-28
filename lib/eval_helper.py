@@ -438,7 +438,8 @@ def eval_cap(model, device, dataset, dataloader, phase, folder, config , tridetr
         if not os.path.exists(corpus_path) or force:
             print("preparing corpus...")
             if dataset.name == "ScanRefer":
-                raw_data = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_{}.json".format(phase))))
+                file_name = phase if phase == "val" else "train_small"
+                raw_data = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_{}.json".format(file_name))))
             elif dataset.name == "ReferIt3D":
                 raw_data = json.load(open(os.path.join(CONF.PATH.DATA, "nr3d_{}.json".format(phase))))
             else:

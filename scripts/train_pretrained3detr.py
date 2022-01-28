@@ -62,9 +62,9 @@ def get_model(args, dataset, device):
     tridetr , _ = build_3detr(args, dataset_config=DC)
     if not args.use_checkpoint:
         # TODO: Clear before sending code
-        sd = torch.load(os.path.join(CONF.PATH.DATA,"tridetr_checkpoints","scannet_masked_ep1080.pth"))
+        #sd = torch.load(os.path.join(CONF.PATH.DATA,"tridetr_checkpoints","scannet_masked_ep1080.pth"))
         #local version
-        #sd = torch.load("/home/kagan/adl4cv/Scan2Cap3detr/data/tridetr_checkpoints/scannet_masked_ep1080.pth")
+        sd = torch.load("/home/kagan/adl4cv/Scan2Cap3detr/data/tridetr_checkpoints/scannet_masked_ep1080.pth")
         # add initialized bbox_feature layer
         for k, v in tridetr.state_dict().items():
             if "mlp_heads.bbox_feature" in k:
@@ -235,7 +235,7 @@ def get_scannet_scene_list(split):
 def get_scanrefer(args):
     if args.dataset == "ScanRefer":
         scanrefer_train = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
-        scanrefer_eval_train = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
+        scanrefer_eval_train = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train_small.json")))
         scanrefer_eval_val = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_val.json")))
     elif args.dataset == "ReferIt3D":
         scanrefer_train = json.load(open(os.path.join(CONF.PATH.DATA, "nr3d_train.json")))
