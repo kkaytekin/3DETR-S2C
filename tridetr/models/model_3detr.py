@@ -310,11 +310,11 @@ class Model3DETR(nn.Module):
                 box_prediction["bbox_features"] = bbox_features
                 ## This is the same calculation as in scan2cap. But above we have softmaxed values so lets use them.
                 # TODO: Check which is better
-                # negative_score = cls_logits[l][...,-1]
-                # positive_score = 1 - negative_score
-                # objectness_scores = torch.cat((negative_score.unsqueeze(-1),positive_score.unsqueeze(-1)), dim=-1)
-                # box_prediction["bbox_mask"] = objectness_scores.argmax(-1)
-                box_prediction["bbox_mask"] = (objectness_prob > 0.5) * 1 # *1 converts boolean to int
+                negative_score = cls_logits[l][...,-1] # score of background class
+                _ , positive_score = torch.max(cls_logits[l][...,:-1], dim =-1) # highest score among all objects
+                objectness_scores = torch.cat((negative_score.unsqueeze(-1),positive_score.unsqueeze(-1)), dim=-1)
+                box_prediction["bbox_mask"] = objectness_scores.argmax(-1)
+                # box_prediction["bbox_mask"] = (objectness_prob > 0.5) * 1 # *1 converts boolean to int
                 box_prediction["query_xyz"] = query_xyz
             outputs.append(box_prediction)
 
