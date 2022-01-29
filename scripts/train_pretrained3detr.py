@@ -158,7 +158,10 @@ def get_num_params(model):
 def get_solver(args, dataset, dataloader):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = get_model(args, dataset["train"], device)
-    tridetr_criterion = None
+    if args.unfreeze_3detr:
+        tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
+    else:
+        tridetr_criterion = None
     #Uncomment the following to calculate 3DETR losses. Commented out for faster training.
     #tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
