@@ -92,12 +92,13 @@ def get_model(args, dataset, device):
         use_distance=args.use_distance,
         use_new=args.use_new
     )
-    # first freeze all layers in tridetr
-    for param in model.tridetr.parameters():
-        param.requires_grad = False
-    # then unfreeze feature extraction layer for captioning
-    for param in model.tridetr.mlp_heads["bbox_feature"].parameters():
-        param.requires_grad = True
+    if not args.unfreeze_3detr:
+        # first freeze all layers in tridetr
+        for param in model.tridetr.parameters():
+            param.requires_grad = False
+        # then unfreeze feature extraction layer for captioning
+        for param in model.tridetr.mlp_heads["bbox_feature"].parameters():
+            param.requires_grad = True
     # load pretrained model
     # print("loading pretrained VoteNet...")
     # pretrained_model = CapNet(
@@ -439,6 +440,8 @@ if __name__ == "__main__":
     parser.add_argument("--loss_angle_reg_weight", default=0.5, type=float)
     parser.add_argument("--loss_center_weight", default=5.0, type=float)
     parser.add_argument("--loss_size_weight", default=1.0, type=float)
+
+    parser.add_argument("--unfreeze_3detr", action="store_true", help="Allow 3detr backbone to keep training")
 
     args = parser.parse_args()
 
