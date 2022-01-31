@@ -36,7 +36,7 @@ def softmax(x):
 
 
 # This is exactly the same as VoteNet so that we can compare evaluations.
-def parse_predictions(
+def parse_predictions_ap(
     predicted_boxes, sem_cls_probs, objectness_probs, point_cloud, config_dict
 ):
     """Parse predictions to OBB parameters and suppress overlapping boxes
@@ -196,7 +196,7 @@ def parse_predictions(
         if config_dict["per_class_proposal"]:
             assert config_dict["use_cls_confidence_only"] is False
             cur_list = []
-            for ii in range(config_dict["dataset_config"].num_semcls):
+            for ii in range(config_dict["dataset_config"].num_class):
                 cur_list += [
                     (
                         ii,
@@ -548,7 +548,7 @@ class APCalculator(object):
             gt_box_corners, gt_box_sem_cls_labels, gt_box_present
         )
 
-        batch_pred_map_cls = parse_predictions(
+        batch_pred_map_cls = parse_predictions_ap(
             predicted_box_corners,
             sem_cls_probs,
             objectness_probs,

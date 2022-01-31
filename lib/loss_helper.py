@@ -86,13 +86,12 @@ def compute_objectness_loss(data_dict):
             within [0,num_gt_object-1]
     """ 
     # Associate proposal and GT objects by point-to-point distances
-    # aggregated_vote_xyz = data_dict["aggregated_vote_xyz"]
-    query_xyz = data_dict["query_xyz"] # Wrong. Refer to full 3detr outputs
+    aggregated_vote_xyz = data_dict["aggregated_vote_xyz"]
     gt_center = data_dict["center_label"][:,:,0:3]
     B = gt_center.shape[0]
-    K = query_xyz.shape[1]
+    K = aggregated_vote_xyz.shape[1]
     K2 = gt_center.shape[1]
-    dist1, ind1, dist2, _ = nn_distance(query_xyz, gt_center) # dist1: BxK, dist2: BxK2
+    dist1, ind1, dist2, _ = nn_distance(aggregated_vote_xyz, gt_center) # dist1: BxK, dist2: BxK2
 
     # Generate objectness label and mask
     # objectness_label: 1 if pred object center is within NEAR_THRESHOLD of any GT object

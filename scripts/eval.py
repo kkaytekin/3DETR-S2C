@@ -23,10 +23,14 @@ import lib.capeval.rouge.rouge as caprouge
 from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.dataset import ScannetReferenceDataset
 from lib.config import CONF
-from lib.ap_helper import APCalculator, parse_predictions, parse_groundtruths
-from lib.loss_helper import get_scene_cap_loss
+from lib.loss_helper import get_detr_and_cap_loss
 from models.capnet import CapNet
 from lib.eval_helper import eval_cap
+
+from tridetr.models.model_3detr import build_3detr
+from tridetr.criterion import build_criterion
+from tridetr.utils.ap_calculator import APCalculator
+from tridetr.utils.dist import all_gather_dict
 
 # SCANREFER_TRAIN = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
 # SCANREFER_VAL = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_val.json")))
@@ -56,6 +60,7 @@ def get_dataloader(args, scanrefer, all_scene_list, config):
 def get_model(args, dataset, device, root=CONF.PATH.OUTPUT, eval_pretrained=False):
     # initiate model
     input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
+    tridetr , _ = build_3detr(args, dataset_config=DC)
     model = CapNet(
         num_class=DC.num_class,
         vocabulary=dataset.vocabulary,
@@ -63,6 +68,9 @@ def get_model(args, dataset, device, root=CONF.PATH.OUTPUT, eval_pretrained=Fals
         num_heading_bin=DC.num_heading_bin,
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
+
+        tridetrmodel=tridetr,
+
         input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
         no_caption=not args.eval_caption,
@@ -74,39 +82,11 @@ def get_model(args, dataset, device, root=CONF.PATH.OUTPUT, eval_pretrained=Fals
         use_relation=args.use_relation
     )
 
-    if eval_pretrained:
-        # load pretrained model
-        print("loading pretrained VoteNet...")
-        pretrained_model = CapNet(
-            num_class=DC.num_class,
-            vocabulary=dataset.vocabulary,
-            embeddings=dataset.glove,
-            num_heading_bin=DC.num_heading_bin,
-            num_size_cluster=DC.num_size_cluster,
-            mean_size_arr=DC.mean_size_arr,
-            num_proposal=args.num_proposals,
-            input_feature_dim=input_channels,
-            no_caption=True
-        )
-
-        pretrained_name = "PRETRAIN_VOTENET_XYZ"
-        if args.use_color: pretrained_name += "_COLOR"
-        if args.use_multiview: pretrained_name += "_MULTIVIEW"
-        if args.use_normal: pretrained_name += "_NORMAL"
-
-        pretrained_path = os.path.join(CONF.PATH.PRETRAINED, pretrained_name, "model.pth")
-        pretrained_model.load_state_dict(torch.load(pretrained_path), strict=False)
-
-        # mount
-        model.backbone_net = pretrained_model.backbone_net
-        model.vgen = pretrained_model.vgen
-        model.proposal = pretrained_model.proposal
-    else:
-        # load
-        model_name = "model_last.pth" if args.use_last else "model.pth"
-        model_path = os.path.join(root, args.folder, model_name)
-        model.load_state_dict(torch.load(model_path), strict=False)
-        # model.load_state_dict(torch.load(model_path))
+    # load
+    model_name = "model_last.pth" if args.use_last else "model.pth"
+    model_path = os.path.join(root, args.folder, model_name)
+    model.load_state_dict(torch.load(model_path), strict=False)
+    # model.load_state_dict(torch.load(model_path))
     
     # to device
     model.to(device)
@@ -157,8 +137,19 @@ def eval_caption(args):
     model = get_model(args, dataset, device)
 
     # evaluate
-    bleu, cider, rouge, meteor = eval_cap(model, device, dataset, dataloader, "val", args.folder, args.use_tf, 
-        force=args.force, save_interm=args.save_interm, min_iou=args.min_iou)
+    bleu, cider, rouge, meteor = eval_cap(
+        model,
+        device,
+        dataset,
+        dataloader,
+        "val",
+        args.folder,
+        config= DC,
+        tridetrcriterion = None,
+        use_tf= args.use_tf,
+        force=args.force,
+        save_interm=args.save_interm,
+        min_iou=args.min_iou)
 
     # report
     print("\n----------------------Evaluation-----------------------")
@@ -171,11 +162,12 @@ def eval_caption(args):
     print("[METEOR] Mean: {:.4f}, Max: {:.4f}, Min: {:.4f}".format(meteor[0], max(meteor[1]), min(meteor[1])))
     print()
 
+@torch.no_grad()
 def eval_detection(args):
     print("evaluate detection...")
     # constant
     DC = ScannetDatasetConfig()
-    
+
     # init training dataset
     print("preparing data...")
     # get eval data
@@ -192,40 +184,58 @@ def eval_detection(args):
 
     # config
     POST_DICT = {
-        "remove_empty_box": True, 
-        "use_3d_nms": True, 
+        "remove_empty_box": True,
+        "use_3d_nms": True,
         "nms_iou": 0.25,
-        "use_old_type_nms": False, 
-        "cls_nms": True, 
+        "use_old_type_nms": False,
+        "cls_nms": True,
         "per_class_proposal": True,
+        "use_cls_confidence_only": False, # new in 3detr
         "conf_thresh": 0.05,
+        "no_nms": False, # new in 3detr
         "dataset_config": DC
     }
-    AP_IOU_THRESHOLDS = [0.25, 0.5]
-    AP_CALCULATOR_LIST = [APCalculator(iou_thresh, DC.class2type) for iou_thresh in AP_IOU_THRESHOLDS]
+    ap_calculator = APCalculator(
+        dataset_config=DC,
+        ap_iou_thresh=[0.25, 0.5],
+        class2type_map=DC.class2type,
+        exact_eval=True,
+        ap_config_dict=POST_DICT
+    )
 
-    sem_acc = []
     for data in tqdm(dataloader):
         for key in data:
             data[key] = data[key].cuda()
 
         # feed
-        with torch.no_grad():
-            data = model(data, False, True)
-            data = get_scene_cap_loss(data, device, DC, weights=dataset.weights, detection=True, caption=False)
+        data = model(data_dict=data,use_tf= False,is_eval= True)
+        if args.compute_loss:
+            data = get_detr_and_cap_loss(data_dict=data,
+                                         device=device,
+                                         config=DC,
+                                         weights=dataset.weights,
+                                         detection=True,
+                                         caption=False,
+                                         tridetrcriterion=build_criterion(args, DC))
+            print("Loss is:",data["loss"])
+        outputs = {}
+        outputs["outputs"] = all_gather_dict(data["box_predictions"]["outputs"])
+        batch_gt_map = gather_groundtruths(data)
+        ap_calculator.step_meter(outputs, batch_gt_map)
+    metrics = ap_calculator.compute_metrics()
+    metric_str = ap_calculator.metrics_to_str(metrics)
+        #Print the results
+    print("==" * 10)
+    print(f"Test model; Metrics {metric_str}")
+    print("==" * 10)
 
-        batch_pred_map_cls = parse_predictions(data, POST_DICT) 
-        batch_gt_map_cls = parse_groundtruths(data, POST_DICT) 
-        for ap_calculator in AP_CALCULATOR_LIST:
-            ap_calculator.step(batch_pred_map_cls, batch_gt_map_cls)
-
-    # aggregate object detection results and report
-    for i, ap_calculator in enumerate(AP_CALCULATOR_LIST):
-        print()
-        print("-"*10, "iou_thresh: %f"%(AP_IOU_THRESHOLDS[i]), "-"*10)
-        metrics_dict = ap_calculator.compute_metrics()
-        for key in metrics_dict:
-            print("eval %s: %f"%(key, metrics_dict[key]))
+def gather_groundtruths(data_dict):
+    targets = {}
+    targets["point_clouds"] = data_dict["point_clouds"]
+    targets["gt_box_corners"] = data_dict["gt_box_corners"]
+    targets["gt_box_sem_cls_label"] = data_dict["gt_box_sem_cls_label"]
+    targets["gt_box_present"] = data_dict["gt_box_present"]
+    return all_gather_dict(targets)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -267,6 +277,65 @@ if __name__ == "__main__":
     
     parser.add_argument("--force", action="store_true", help="generate the results by force")
     parser.add_argument("--save_interm", action="store_true", help="Save the intermediate results")
+
+    #3DETR arguments
+    ### Encoder
+    parser.add_argument(
+        "--enc_type", default="vanilla", choices=["masked", "maskedv2", "vanilla"]
+    )
+    # Below options are only valid for vanilla encoder
+    parser.add_argument("--enc_nlayers", default=3, type=int)
+    parser.add_argument("--enc_dim", default=256, type=int)
+    parser.add_argument("--enc_ffn_dim", default=128, type=int)
+    parser.add_argument("--enc_dropout", default=0.1, type=float)
+    parser.add_argument("--enc_nhead", default=4, type=int)
+    parser.add_argument("--enc_pos_embed", default=None, type=str)
+    parser.add_argument("--enc_activation", default="relu", type=str)
+
+    ### Decoder
+    parser.add_argument("--dec_nlayers", default=8, type=int)
+    parser.add_argument("--dec_dim", default=256, type=int)
+    parser.add_argument("--dec_ffn_dim", default=256, type=int)
+    parser.add_argument("--dec_dropout", default=0.1, type=float)
+    parser.add_argument("--dec_nhead", default=4, type=int)
+
+    ### MLP heads for predicting bounding boxes
+    parser.add_argument("--mlp_dropout", default=0.3, type=float)
+    parser.add_argument(
+        "--nsemcls",
+        default=-1,
+        type=int,
+        help="Number of semantic object classes. Can be inferred from dataset",
+    )
+
+    ### Other model params
+    parser.add_argument("--preenc_npoints", default=2048, type=int)
+    parser.add_argument(
+        "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
+    )
+    #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
+    #parser.add_argument("--use_color", default=False, action="store_true")
+
+    ##### Set Loss #####
+    ### Matcher
+    parser.add_argument("--matcher_giou_cost", default=2, type=float)
+    parser.add_argument("--matcher_cls_cost", default=1, type=float)
+    parser.add_argument("--matcher_center_cost", default=0, type=float)
+    parser.add_argument("--matcher_objectness_cost", default=0, type=float)
+
+    ### Loss Weights
+    parser.add_argument("--loss_giou_weight", default=0, type=float)
+    parser.add_argument("--loss_sem_cls_weight", default=1, type=float)
+    parser.add_argument(
+        "--loss_no_object_weight", default=0.2, type=float
+    )  # "no object" or "background" class for detection
+    parser.add_argument("--loss_angle_cls_weight", default=0.1, type=float)
+    parser.add_argument("--loss_angle_reg_weight", default=0.5, type=float)
+    parser.add_argument("--loss_center_weight", default=5.0, type=float)
+    parser.add_argument("--loss_size_weight", default=1.0, type=float)
+
+    parser.add_argument("--compute_loss", action="store_true", help="Compute loss while evaluating detection")
+
     args = parser.parse_args()
 
     # setting
