@@ -173,8 +173,12 @@ def get_solver(args, dataset, dataloader):
         stamp = args.use_checkpoint
         root = os.path.join(CONF.PATH.OUTPUT, stamp)
         checkpoint = torch.load(os.path.join(CONF.PATH.OUTPUT, args.use_checkpoint, "checkpoint.tar"))
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if args.load_best:
+            best_model_state = torch.load(os.path.join(CONF.PATH.OUTPUT, args.use_checkpoint, "model.pth"))
+            model.load_state_dict(best_model_state, strict=False)
+        else:
+            model.load_state_dict(checkpoint["model_state_dict"])
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         checkpoint_best = checkpoint["best"]
     else:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -445,6 +449,7 @@ if __name__ == "__main__":
     parser.add_argument("--loss_size_weight", default=1.0, type=float)
 
     parser.add_argument("--unfreeze_3detr", action="store_true", help="Allow 3detr backbone to keep training")
+    parser.add_argument("--load_best", action="store_true", help="Use best model when using checkpoint")
 
     args = parser.parse_args()
 

@@ -128,11 +128,11 @@ class Model3DETR(nn.Module):
             hidden_use_bias=True,
         )
         self.decoder = decoder
-        # TODO: Not building mlp heads, will use ProposalModule feed forward
+
         self.build_mlp_heads(dataset_config, decoder_dim, mlp_dropout)
 
         self.num_queries = num_queries
-        # TODO: Not including box_processor, use ProposalModule instead.
+
         self.box_processor = BoxProcessor(dataset_config)
 
     def build_mlp_heads(self, dataset_config, decoder_dim, mlp_dropout):
@@ -155,7 +155,7 @@ class Model3DETR(nn.Module):
         size_head = mlp_func(output_dim=3)
         angle_cls_head = mlp_func(output_dim=dataset_config.num_heading_bin)
         angle_reg_head = mlp_func(output_dim=dataset_config.num_heading_bin)
-        bbox_feature_head = mlp_func(output_dim=128, dropout=0.1) # TODO: Hyperparameters, track
+        bbox_feature_head = mlp_func(output_dim=128) # TODO: Hyperparameters, track
 
         mlp_heads = [
             ("sem_cls_head", semcls_head),
