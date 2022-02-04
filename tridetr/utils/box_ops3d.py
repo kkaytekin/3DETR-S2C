@@ -544,7 +544,6 @@ def generalized_box3d_iou(corners1, corners2, nums_k2=None):
 
     # degenerate boxes gives inf / nan results
     # so do an early check
-    #TODO:
     assert corners1.ndim == 4
     assert corners2.ndim == 4
     assert corners1.shape[0] == corners2.shape[0]

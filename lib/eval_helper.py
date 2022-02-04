@@ -2,15 +2,8 @@ import os
 import sys
 import json
 import torch
-import pickle
-import argparse
-
 import numpy as np
-
 from tqdm import tqdm
-from copy import deepcopy
-from torch.utils.data import DataLoader
-from numpy.linalg import inv
 
 sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
 
@@ -21,9 +14,8 @@ import lib.capeval.meteor.meteor as capmeteor
 
 from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.config import CONF
-#from lib.ap_helper import parse_predictions #use 3detr version instead
 from tridetr.utils.ap_calculator import parse_predictions
-from lib.loss_helper import get_scene_cap_loss, get_object_cap_loss, get_detr_and_cap_loss
+from lib.loss_helper import get_detr_and_cap_loss
 from utils.box_util import box3d_iou_batch_tensor, rotate_preds
 
 # constants
@@ -168,9 +160,7 @@ def feed_scene_cap(model, device, dataset, dataloader, phase, folder, config , t
 
         with torch.no_grad():
             data_dict = model(data_dict, use_tf, is_eval)
-            #data_dict = get_scene_cap_loss(data_dict, device, DC, weights=dataset.weights, detection=True, caption=False)
             data_dict = get_detr_and_cap_loss(
-            #data_dict = get_scene_cap_loss(
                 data_dict=data_dict,
                 device=device,
                 config=config,
@@ -217,10 +207,6 @@ def feed_scene_cap(model, device, dataset, dataloader, phase, folder, config , t
             data_dict["object_assignment"].view(batch_size, num_proposals, 1, 1).repeat(1, 1, 8, 3)
         ) # batch_size, num_proposals, 8, 3
         detected_bbox_corners = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
-        # fix i used for iou calculation for caption loss
-        # detected_bbox_corners = rotate_preds(detected_bbox_corners)
-        # following is not used, so comment out
-        # detected_bbox_centers = data_dict["center"] # batch_size, num_proposals, 3
 
         # compute IoU between each detected box and each ground truth box
         ious = box3d_iou_batch_tensor(
@@ -287,98 +273,6 @@ def feed_scene_cap(model, device, dataset, dataloader, phase, folder, config , t
 
     return candidates
 
-# def feed_oracle_cap(model, device, dataset, dataloader, phase, folder, use_tf=False, is_eval=True, max_len=CONF.TRAIN.MAX_DES_LEN):
-#     candidates = {}
-#     for data_dict in tqdm(dataloader):
-#         # move to cuda
-#         for key in data_dict:
-#             data_dict[key] = data_dict[key].to(device)
-
-#         with torch.no_grad():
-#             data_dict = model(data_dict, use_tf, is_eval)
-
-#         # unpack
-#         captions = data_dict["lang_cap"].argmax(-1) # batch_size, num_proposals, max_len - 1
-#         dataset_ids = data_dict["dataset_idx"]
-#         batch_size, num_proposals, _ = captions.shape
-
-#         # pick out object ids of detected objects
-#         detected_object_ids = data_dict["scene_object_ids"]
-
-#         # masks for the valid bboxes
-#         masks = data_dict["target_masks"] # batch_size, num_proposals
-        
-#         # dump generated captions
-#         for batch_id in range(batch_size):
-#             dataset_idx = dataset_ids[batch_id].item()
-#             scene_id = dataset.scanrefer[dataset_idx]["scene_id"]
-#             for prop_id in range(num_proposals):
-#                 if masks[batch_id, prop_id] == 1:
-#                     object_id = str(detected_object_ids[batch_id, prop_id].item())
-#                     caption_decoded = decode_caption(captions[batch_id, prop_id], dataset.vocabulary["idx2word"])
-
-#                     # print(scene_id, object_id)
-#                     try:
-#                         ann_list = list(SCANREFER_ORGANIZED[scene_id][object_id].keys())
-#                         object_name = SCANREFER_ORGANIZED[scene_id][object_id][ann_list[0]]["object_name"]
-
-#                         # store
-#                         key = "{}|{}|{}".format(scene_id, object_id, object_name)
-#                         # key = "{}|{}".format(scene_id, object_id)
-#                         candidates[key] = [caption_decoded]
-#                     except KeyError:
-#                         continue
-
-#     return candidates
-
-# def feed_object_cap(model, device, dataset, dataloader, phase, folder, use_tf=False, is_eval=True, max_len=CONF.TRAIN.MAX_DES_LEN):
-#     candidates = {}
-#     cls_acc = []
-#     for data_dict in tqdm(dataloader):
-#         # move to cuda
-#         for key in data_dict:
-#             data_dict[key] = data_dict[key].to(device)
-
-#         with torch.no_grad():
-#             data_dict = model(data_dict, use_tf, is_eval)
-#             data_dict = get_object_cap_loss(data_dict, DC, weights=dataset.weights, classify=True, caption=False)
-        
-#         # unpack
-#         preds = data_dict["enc_preds"] # (B, num_cls)
-#         targets = data_dict["object_cat"] # (B,)
-        
-#         # classification acc
-#         preds = preds.argmax(-1) # (B,)
-#         acc = (preds == targets).sum().float() / targets.shape[0]
-        
-#         # dump
-#         cls_acc.append(acc.item())
-
-#         # unpack
-#         captions = data_dict["lang_cap"].argmax(-1) # batch_size, max_len - 1
-#         dataset_ids = data_dict["dataset_idx"]
-#         batch_size, _ = captions.shape
-        
-#         # dump generated captions
-#         for batch_id in range(batch_size):
-#             dataset_idx = dataset_ids[batch_id].item()
-#             scene_id = dataset.scanrefer[dataset_idx]["scene_id"]
-#             object_id = dataset.scanrefer[dataset_idx]["object_id"]
-#             caption_decoded = decode_caption(captions[batch_id], dataset.vocabulary["idx2word"])
-
-#             try:
-#                 ann_list = list(SCANREFER_ORGANIZED[scene_id][object_id].keys())
-#                 object_name = SCANREFER_ORGANIZED[scene_id][object_id][ann_list[0]]["object_name"]
-
-#                 # store
-#                 key = "{}|{}|{}".format(scene_id, object_id, object_name)
-#                 candidates[key] = [caption_decoded]
-#             except KeyError:
-#                 continue
-
-#     cls_acc = np.mean(cls_acc)
-
-#     return candidates, cls_acc
 
 def update_interm(interm, candidates, bleu, cider, rouge, meteor):
     for i, (key, value) in enumerate(candidates.items()):
@@ -461,15 +355,15 @@ def eval_cap(model, device, dataset, dataloader, phase, folder, config , tridetr
             raise ValueError("Invalid dataset.")
 
         pred_path = os.path.join(CONF.PATH.OUTPUT, folder, "pred_{}.json".format(phase))
-        # if not os.path.exists(pred_path) or force:
+
         # generate results
         print("generating descriptions...")
         if mode == "scene":
             candidates = feed_scene_cap(model, device, dataset, dataloader, phase, folder, config , tridetrcriterion, use_tf, is_eval, max_len, save_interm, min_iou, organized=organized)
         elif mode == "object":
-            candidates, cls_acc = feed_object_cap(model, device, dataset, dataloader, phase, folder, use_tf, is_eval, max_len)
+            raise NotImplementedError()
         elif mode == "oracle":
-            candidates = feed_oracle_cap(model, device, dataset, dataloader, phase, folder, use_tf, is_eval, max_len)
+            raise NotImplementedError()
         else:
             raise ValueError("invalid mode: {}".format(mode))
 
@@ -481,10 +375,6 @@ def eval_cap(model, device, dataset, dataloader, phase, folder, config , tridetr
 
         with open(pred_path, "w") as f:
             json.dump(candidates, f, indent=4)
-        # else:
-        #     print("loading descriptions...")
-        #     with open(pred_path) as f:
-        #         candidates = json.load(f)
 
         # compute scores
         print("computing scores...")
@@ -493,7 +383,7 @@ def eval_cap(model, device, dataset, dataloader, phase, folder, config , tridetr
         rouge = caprouge.Rouge().compute_score(corpus, candidates)
         meteor = capmeteor.Meteor().compute_score(corpus, candidates)
 
-        # # save scores
+        # # uncomment to save scores
         # print("saving scores...")
         # score_path = os.path.join(CONF.PATH.OUTPUT, folder, "score_{}.json".format(phase))
         # with open(score_path, "w") as f:

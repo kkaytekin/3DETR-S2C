@@ -23,7 +23,7 @@ from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.dataset import ScannetReferenceDataset
 from lib.config import CONF
 from lib.loss_helper import get_detr_and_cap_loss
-from models.capnet import CapNet
+from models.tridetrS2c import TridetrS2c
 from scripts.colors import COLORS
 
 from tridetr.models.model_3detr import build_3detr
@@ -58,9 +58,8 @@ def get_dataloader(args, scanrefer, all_scene_list, config):
 
 def get_model(args, dataset,device, root=CONF.PATH.OUTPUT):
     # initiate model
-    input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
     tridetr , _ = build_3detr(args, dataset_config=DC)
-    model = CapNet(
+    model = TridetrS2c(
         num_class=DC.num_class,
         vocabulary=dataset.vocabulary,
         embeddings=dataset.glove,
@@ -68,7 +67,6 @@ def get_model(args, dataset,device, root=CONF.PATH.OUTPUT):
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
         tridetrmodel=tridetr,
-        input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
         no_caption=args.no_caption,
         use_topdown=args.use_topdown,
@@ -79,7 +77,6 @@ def get_model(args, dataset,device, root=CONF.PATH.OUTPUT):
         use_relation=args.use_relation, # TODO: the rest ist training args, change in eval
         use_orientation=args.use_orientation,
         use_distance=args.use_distance,
-        use_new=args.use_new
     )
 
     # load
@@ -432,7 +429,6 @@ if __name__ == "__main__":
 
     parser.add_argument("--no_caption", action="store_true", help="Do NOT train the caption module.")
     parser.add_argument("--use_orientation", action="store_true", help="Use object-to-object orientation loss in graph.")
-    parser.add_argument("--use_new", action="store_true", help="Use new Top-down module.")
 
     parser.add_argument("--use_tf", action="store_true", help="Enable teacher forcing")
     parser.add_argument("--use_color", action="store_true", help="Use RGB color in input.")

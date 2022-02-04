@@ -1,6 +1,9 @@
+open3d
 plyfile
 opencv-python
 trimesh==2.35.39
+networkx==2.6.3
+scipy==1.7.3
 tensorboardX
 easydict
 tqdm

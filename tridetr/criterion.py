@@ -352,21 +352,22 @@ class SetCriterion(nn.Module):
                 final_loss += losses[k.replace("_weight", "")]
         return final_loss, losses
 
-    def forward(self, outputs, targets):
-        nactual_gt = targets["gt_box_present"].sum(axis=1).long()
+    def forward(self, data_dict):
+        preds = data_dict["box_predictions"]
+        nactual_gt = data_dict["gt_box_present"].sum(axis=1).long()
         num_boxes = torch.clamp(all_reduce_average(nactual_gt.sum()), min=1).item()
-        targets["nactual_gt"] = nactual_gt
-        targets["num_boxes"] = num_boxes
-        targets[
+        data_dict["nactual_gt"] = nactual_gt
+        data_dict["num_boxes"] = num_boxes
+        data_dict[
             "num_boxes_replica"
         ] = nactual_gt.sum().item()  # number of boxes on this worker for dist training
 
-        loss, loss_dict = self.single_output_forward(outputs["outputs"], targets)
+        loss, loss_dict = self.single_output_forward(preds["outputs"], data_dict)
 
-        if "aux_outputs" in outputs:
-            for k in range(len(outputs["aux_outputs"])):
+        if "aux_outputs" in preds:
+            for k in range(len(preds["aux_outputs"])):
                 interm_loss, interm_loss_dict = self.single_output_forward(
-                    outputs["aux_outputs"][k], targets
+                    preds["aux_outputs"][k], data_dict
                 )
 
                 loss += interm_loss

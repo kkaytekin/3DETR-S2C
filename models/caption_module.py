@@ -17,10 +17,9 @@ DC = ScannetDatasetConfig()
 def select_target(data_dict):
     # predicted bbox
     pred_bbox = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
-    pred_bbox = rotate_preds(pred_bbox)
+    pred_bbox = rotate_preds(pred_bbox) # adjust 3DETR coordinates to S2C coordinates
     batch_size, num_proposals, _, _ = pred_bbox.shape
     # ground truth bbox
-    #gt_bbox = data_dict["gt_box_corners"] bu olmadı # batch_size, MAX_NUM_OBJ, 8, 3
     gt_bbox = data_dict["ref_box_corner_label"] # batch_size, 8, 3
 
     target_ids = []
@@ -31,8 +30,6 @@ def select_target(data_dict):
         gt_bbox_batch = gt_bbox[i].unsqueeze(0).repeat(num_proposals, 1, 1) # num_proposals, 8, 3
         ious = box3d_iou_batch_tensor(pred_bbox_batch, gt_bbox_batch)
         target_id = ious.argmax().item() # 0 ~ num_proposals - 1
-        # debug
-        #print("Max iou: ", ious[target_id])
         target_ids.append(target_id)
         target_ious.append(ious[target_id])
 
@@ -131,6 +128,7 @@ class SceneCaptionModule(nn.Module):
         # are smaller than the threshold, the corresponding predicted captions
         # should be filtered out in case the model learns wrong things
         good_bbox_masks = target_ious > min_iou # batch_size
+        # a more relaxed condition:
         # good_bbox_masks = target_ious != 0 # batch_size
 
         num_good_bboxes = good_bbox_masks.sum()
@@ -224,7 +222,6 @@ class TopDownSceneCaptionModule(nn.Module):
         self.query_mode = query_mode
 
         self.use_relation = use_relation
-        # if self.use_relation: self.map_rel = nn.Linear(feat_size * 2, feat_size)
 
         self.use_oracle = use_oracle
 
@@ -258,10 +255,8 @@ class TopDownSceneCaptionModule(nn.Module):
         self._plot_every = 1
         self._iter_counter = 0
 
-
-
     def _plot_bbox(self,data_dict, plot_every_iters = 10, plot_all_pred = True):
-
+        # Check if the bounding boxes are approaching the GT bbox by plotting the status every "plot_every_iters"
         self._plot_every = plot_every_iters
 
         pred_bbox = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
@@ -269,10 +264,9 @@ class TopDownSceneCaptionModule(nn.Module):
         pred_bbox = rotate_preds(pred_bbox)
 
         # ground truth bbox
-        #gt_bbox = data_dict["gt_box_corners"] bu olmadı # batch_size, MAX_NUM_OBJ, 8, 3
         gt_bbox = data_dict["ref_box_corner_label"] # batch_size, 8, 3
         if (self._iter_counter % self._plot_every == 0):
-            # Our lines span from points 0 to 1, 1 to 2, 2 to 3, etc...
+            # Edges of the bbox
             lines = [[0, 1], [1, 2], [2, 3], [0, 3],
                      [4, 5], [5, 6], [6, 7], [4, 7],
                      [0, 4], [1, 5], [2, 6], [3, 7]]
@@ -304,14 +298,7 @@ class TopDownSceneCaptionModule(nn.Module):
             )
             GT_box.colors = o3d.utility.Vector3dVector(gt_color)
             geometries.append(GT_box)
-            # debug mode:
-            # scene id: 'scene0000_00'
-            # object id: 39
-            # object name: cabinet
-            #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0000_00/axis_aligned_scene.ply")
-            #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/data/scannet/scans/scene0000_00/scene0000_00_vh_clean_2.ply")
-            #pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0004_00/axis_aligned_scene.ply")
-            # TODO: Ask - scene axes are different than GT and predicted axes. BBOX'es do not fit.
+            # TODO: Provide the path of the chosen scene manually.
             pcd = o3d.io.read_point_cloud("/home/kagan/adl4cv/scan2cap-with-transformers/outputs/ScanNet_axis_aligned_mesh/scene0031_00/axis_aligned_scene.ply")
 
             geometries.append(pcd)
@@ -474,7 +461,6 @@ class TopDownSceneCaptionModule(nn.Module):
         rel_feats = torch.gather(rel_feats, 1, 
             target_ids.view(batch_size, 1, 1, 1).repeat(1, 1, self.num_locals, self.feat_size)).squeeze(1) # batch_size, num_locals, feat_size
 
-        # new_obj_feats = torch.cat([obj_feats, rel_feats], dim=1) # batch_size, num_proposals + num_locals, feat_size
 
         # scatter the relation features to objects
         adjacent_mat = data_dict["adjacent_mat"] # batch_size, num_proposals, num_proposals
@@ -484,8 +470,6 @@ class TopDownSceneCaptionModule(nn.Module):
         scattered_rel_feats = torch.zeros(obj_feats.shape).cuda().masked_scatter(rel_masks, rel_feats) # batch_size, num_proposals, feat_size
 
         new_obj_feats = obj_feats + scattered_rel_feats
-        # new_obj_feats = torch.cat([obj_feats, scattered_rel_feats], dim=-1)
-        # new_obj_feats = self.map_rel(new_obj_feats)
 
         return new_obj_feats
 

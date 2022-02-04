@@ -8,14 +8,12 @@ import sys
 import time
 import torch
 import numpy as np
-from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from torch.optim.lr_scheduler import StepLR, MultiStepLR
 
 
 sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 from lib.config import CONF
-from lib.loss_helper import get_scene_cap_loss
 from lib.loss_helper import get_detr_and_cap_loss
 from lib.eval_helper import eval_cap
 from utils.eta import decode_eta
@@ -229,9 +227,6 @@ class Solver():
                 "cap_loss": [],
                 "ori_loss": [],
                 "dist_loss": [],
-                #"objectness_loss": [],
-                #"vote_loss": [],
-                #"box_loss": [],
                 "cls_loss": [],
                 "angle_cls_loss": [],
                 "angle_reg_loss": [],
@@ -274,9 +269,6 @@ class Solver():
                         "cap_loss",
                         "ori_loss",
                         "dist_loss",
-                        #"objectness_loss": 0,
-                        #"vote_loss": 0,
-                        #"box_loss": 0,
                         "cls_loss",
                         "angle_cls_loss",
                         "angle_reg_loss",
@@ -327,7 +319,6 @@ class Solver():
     def _compute_loss(self, data_dict):
 
         data_dict = get_detr_and_cap_loss(
-        #data_dict = get_scene_cap_loss(
             data_dict=data_dict, 
             device=self.device,
             config=self.config, 
@@ -353,7 +344,6 @@ class Solver():
             self._running_log["size_loss"] = data_dict["loss_size"]
             self._running_log["cardinality_loss"] = data_dict["loss_cardinality"]
         self._running_log["loss"] = data_dict["loss"]
-
         # store eval
         self._running_log["cap_acc"] = data_dict["cap_acc"].item()
         self._running_log["ori_acc"] = data_dict["ori_acc"].item()
@@ -361,7 +351,6 @@ class Solver():
         self._running_log["obj_acc"] = data_dict["obj_acc"].item()
         self._running_log["pos_ratio"] = data_dict["pos_ratio"].item()
         self._running_log["neg_ratio"] = data_dict["neg_ratio"].item()
-
 
     def _eval(self, phase):
         if self.caption:
@@ -421,9 +410,6 @@ class Solver():
                     "cap_loss": 0,
                     "ori_loss": 0,
                     "dist_loss": 0,
-                    #"objectness_loss": 0,
-                    #"vote_loss": 0,
-                    #"box_loss": 0,
                     "cls_loss": 0,
                     "angle_cls_loss":0,
                     "angle_reg_loss":0,
@@ -451,14 +437,11 @@ class Solver():
 
                 # backward
                 start = time.time()
-                # TODO: Utilize detect_anomaly for pytorch 1.10.
-                #with torch.autograd.set_detect_anomaly(True):
                 self._backward()
                 self.log[phase]["backward"].append(time.time() - start)
                 
                 # eval
                 start = time.time()
-                # self._eval(data_dict)
                 self.log[phase]["eval"].append(time.time() - start)
 
                 # record log
@@ -591,9 +574,6 @@ class Solver():
             train_cap_loss=round(np.mean([v for v in self.log["train"]["cap_loss"]]), 5),
             train_ori_loss=round(np.mean([v for v in self.log["train"]["ori_loss"]]), 5),
             train_dist_loss=round(np.mean([v for v in self.log["train"]["dist_loss"]]), 5),
-            #train_objectness_loss=round(np.mean([v for v in self.log["train"]["objectness_loss"]]), 5),
-            #train_vote_loss=round(np.mean([v for v in self.log["train"]["vote_loss"]]), 5),
-            #train_box_loss=round(np.mean([v for v in self.log["train"]["box_loss"]]), 5),
             train_cls_loss=round(np.mean([v for v in self.log["train"]["cls_loss"]]), 5),
             train_angle_cls_loss=round(np.mean([v for v in self.log["train"]["angle_cls_loss"]]), 5),
             train_angle_reg_loss=round(np.mean([v for v in self.log["train"]["angle_reg_loss"]]), 5),

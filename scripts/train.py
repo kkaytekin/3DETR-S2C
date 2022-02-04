@@ -22,13 +22,11 @@ from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.dataset import ScannetReferenceDataset
 from lib.solver import Solver
 from lib.config import CONF
-from models.capnet import CapNet
-from scripts.eval_pretrained import SCANREFER_TRAIN
+from models.tridetrS2c import TridetrS2c
 from tridetr.models.model_3detr import build_3detr
 from tridetr.criterion import build_criterion
 
-# SCANREFER_DUMMY = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_dummy.json")))
-
+SCANREFER_TRAIN = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
 # extracted ScanNet object rotations from Scan2CAD 
 # NOTE some scenes are missing in this annotation!!!
 SCAN2CAD_ROTATION = json.load(open(os.path.join(CONF.PATH.SCAN2CAD, "scannet_instance_rotations.json")))
@@ -50,26 +48,22 @@ def get_dataloader(args, scanrefer, all_scene_list, split, config, augment, scan
         augment=augment,
         scan2cad_rotation=scan2cad_rotation
     )
-    # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
     return dataset, dataloader
 
 def get_model(args, dataset, device):
     # initiate model
-    input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
     tridetr , _ = build_3detr(args, dataset_config=DC)
-    model = CapNet(
+    model = TridetrS2c(
         num_class=DC.num_class,
         vocabulary=dataset.vocabulary,
         embeddings=dataset.glove,
         num_heading_bin=DC.num_heading_bin,
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
-
         tridetrmodel=tridetr,
-
-        input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
         no_caption=args.no_caption,
         use_topdown=args.use_topdown,
@@ -80,48 +74,7 @@ def get_model(args, dataset, device):
         use_relation=args.use_relation,
         use_orientation=args.use_orientation,
         use_distance=args.use_distance,
-        use_new=args.use_new
     )
-
-    # load pretrained model
-    # print("loading pretrained VoteNet...")
-    # pretrained_model = CapNet(
-    #     num_class=DC.num_class,
-    #     vocabulary=dataset.vocabulary,
-    #     embeddings=dataset.glove,
-    #     num_heading_bin=DC.num_heading_bin,
-    #     num_size_cluster=DC.num_size_cluster,
-    #     mean_size_arr=DC.mean_size_arr,
-    #     num_proposal=args.num_proposals,
-    #     input_feature_dim=input_channels,
-    #     no_caption=True
-    # )
-    #
-    # pretrained_name = "PRETRAIN_VOTENET_XYZ"
-    # if args.use_color: pretrained_name += "_COLOR"
-    # if args.use_multiview: pretrained_name += "_MULTIVIEW"
-    # if args.use_normal: pretrained_name += "_NORMAL"
-    #
-    # pretrained_path = os.path.join(CONF.PATH.PRETRAINED, pretrained_name, "model.pth")
-    # pretrained_model.load_state_dict(torch.load(pretrained_path), strict=False)
-    #
-    # # mount
-    # model.backbone_net = pretrained_model.backbone_net
-    # model.vgen = pretrained_model.vgen
-    # model.proposal = pretrained_model.proposal
-    #
-    # if args.no_detection:
-    #     # freeze pointnet++ backbone
-    #     for param in model.backbone_net.parameters():
-    #         param.requires_grad = False
-    #
-    #     # freeze voting
-    #     for param in model.vgen.parameters():
-    #         param.requires_grad = False
-    #
-    #     # freeze detector
-    #     for param in model.proposal.parameters():
-    #         param.requires_grad = False
     
     # to device
     model.to(device)
@@ -142,10 +95,6 @@ def get_num_params(model):
 def get_solver(args, dataset, dataloader):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = get_model(args, dataset["train"], device)
-    if args.unfreeze_3detr:
-        tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
-    else:
-        tridetr_criterion = None
     tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
@@ -232,9 +181,9 @@ def get_scanrefer(args):
         raise ValueError("Invalid dataset.")
 
     if args.debug:
-        scanrefer_train = [SCANREFER_TRAIN[1821]]
-        scanrefer_eval_train = [SCANREFER_TRAIN[1821]]
-        scanrefer_eval_val = [SCANREFER_TRAIN[1821]]
+        scanrefer_train = [SCANREFER_TRAIN[1773]]
+        scanrefer_eval_train = [SCANREFER_TRAIN[1773]]
+        scanrefer_eval_val = [SCANREFER_TRAIN[1773]]
 
     if args.no_caption:
         train_scene_list = get_scannet_scene_list("train")
@@ -360,17 +309,12 @@ if __name__ == "__main__":
     parser.add_argument("--use_multiview", action="store_true", help="Use multiview images.")
     parser.add_argument("--use_topdown", action="store_true", help="Use top-down attention for captioning.")
     parser.add_argument("--use_relation", action="store_true", help="Use object-to-object relation in graph.")
-    parser.add_argument("--use_new", action="store_true", help="Use new Top-down module.")
     parser.add_argument("--use_orientation", action="store_true", help="Use object-to-object orientation loss in graph.")
     parser.add_argument("--use_distance", action="store_true", help="Use object-to-object distance loss in graph.")
-    parser.add_argument("--use_pretrained", type=str, help="Specify the folder name containing the pretrained detection module.")
     parser.add_argument("--use_checkpoint", type=str, help="Specify the checkpoint root", default="")
     
     parser.add_argument("--debug", action="store_true", help="Debug mode.")
     # --------- 3DETR Arguments ---------
-    # TODO: Determine what to parse,
-    #   *which ones affect datalooader & preprocessing,
-    #   *which ones affect the rest?
     ### Encoder
     parser.add_argument(
         "--enc_type", default="vanilla", choices=["masked", "maskedv2", "vanilla"]
@@ -399,14 +343,11 @@ if __name__ == "__main__":
         type=int,
         help="Number of semantic object classes. Can be inferred from dataset",
     )
-
     ### Other model params
     parser.add_argument("--preenc_npoints", default=2048, type=int)
     parser.add_argument(
         "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
     )
-    #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
-    #parser.add_argument("--use_color", default=False, action="store_true")
 
     ##### Set Loss #####
     ### Matcher
@@ -419,7 +360,7 @@ if __name__ == "__main__":
     parser.add_argument("--loss_giou_weight", default=0, type=float)
     parser.add_argument("--loss_sem_cls_weight", default=1, type=float)
     parser.add_argument(
-        "--loss_no_object_weight", default=0.2, type=float
+        "--loss_no_object_weight", default=0.25, type=float
     )  # "no object" or "background" class for detection
     parser.add_argument("--loss_angle_cls_weight", default=0.1, type=float)
     parser.add_argument("--loss_angle_reg_weight", default=0.5, type=float)
@@ -439,4 +380,3 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     train(args)
-    

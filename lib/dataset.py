@@ -9,7 +9,6 @@ import time
 import h5py
 import json
 import pickle
-import random
 import numpy as np
 import multiprocessing as mp
 
@@ -21,9 +20,7 @@ sys.path.append(os.path.join(os.getcwd(), "lib")) # HACK add the lib folder
 from lib.config import CONF
 from utils.pc_utils import random_sampling, rotx, roty, rotz
 from utils.box_util import get_3d_box, get_3d_box_batch
-from data.scannet.model_util_scannet import rotate_aligned_boxes, ScannetDatasetConfig, rotate_aligned_boxes_along_axis
-from tridetr.utils.box_util import (flip_axis_to_camera_np, flip_axis_to_camera_tensor,
-                            get_3d_box_batch_np, get_3d_box_batch_tensor)
+from data.scannet.model_util_scannet import ScannetDatasetConfig, rotate_aligned_boxes_along_axis
 from tridetr.utils.pc_util import scale_points, shift_scale_points
 from tridetr.utils.random_cuboid import RandomCuboid
 
@@ -36,11 +33,8 @@ OBJ_CLASS_IDS = np.array([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 1
 
 # data path
 SCANNET_V2_TSV = os.path.join(CONF.PATH.SCANNET_META, "scannetv2-labels.combined.tsv")
-# SCANREFER_VOCAB = os.path.join(CONF.PATH.DATA, "ScanRefer_vocabulary.json")
 VOCAB = os.path.join(CONF.PATH.DATA, "{}_vocabulary.json") # dataset_name
-# SCANREFER_VOCAB_WEIGHTS = os.path.join(CONF.PATH.DATA, "ScanRefer_vocabulary_weights.json")
 VOCAB_WEIGHTS = os.path.join(CONF.PATH.DATA, "{}_vocabulary_weights.json") # dataset_name
-# MULTIVIEW_DATA = os.path.join(CONF.PATH.SCANNET_DATA, "enet_feats.hdf5")
 MULTIVIEW_DATA = CONF.MULTIVIEW
 GLOVE_PICKLE = os.path.join(CONF.PATH.DATA, "glove.p")
 
@@ -248,11 +242,9 @@ class ReferenceDataset(Dataset):
         self.scene_data = {}
         for scene_id in self.scene_list:
             self.scene_data[scene_id] = {}
-            # self.scene_data[scene_id]["mesh_vertices"] = np.load(os.path.join(CONF.PATH.SCANNET_DATA, scene_id)+"_vert.npy")
             self.scene_data[scene_id]["mesh_vertices"] = np.load(os.path.join(CONF.PATH.SCANNET_DATA, scene_id)+"_aligned_vert.npy") # axis-aligned
             self.scene_data[scene_id]["instance_labels"] = np.load(os.path.join(CONF.PATH.SCANNET_DATA, scene_id)+"_ins_label.npy")
             self.scene_data[scene_id]["semantic_labels"] = np.load(os.path.join(CONF.PATH.SCANNET_DATA, scene_id)+"_sem_label.npy")
-            # self.scene_data[scene_id]["instance_bboxes"] = np.load(os.path.join(CONF.PATH.SCANNET_DATA, scene_id)+"_bbox.npy")
             self.scene_data[scene_id]["instance_bboxes"] = np.load(os.path.join(CONF.PATH.SCANNET_DATA, scene_id)+"_aligned_bbox.npy")
 
         # prepare class mapping
@@ -300,7 +292,7 @@ class ScannetReferenceDataset(ReferenceDataset):
         use_multiview=False, 
         augment=False,
         scan2cad_rotation=None,
-        use_random_cuboid = False,  # TODO: Activate random cuboid once things go well
+        use_random_cuboid = False,
         random_cuboid_min_points=30000):
 
         # NOTE only feed the scan2cad_rotation when on the training mode and train split
@@ -344,26 +336,24 @@ class ScannetReferenceDataset(ReferenceDataset):
         lang_len = len(self.scanrefer[idx]["token"]) + 2
         lang_len = lang_len if lang_len <= CONF.TRAIN.MAX_DES_LEN + 2 else CONF.TRAIN.MAX_DES_LEN + 2
 
-        # get pc
+        # get point cloud
         mesh_vertices = self.scene_data[scene_id]["mesh_vertices"]
         instance_labels = self.scene_data[scene_id]["instance_labels"]
         semantic_labels = self.scene_data[scene_id]["semantic_labels"]
-        instance_bboxes = self.scene_data[scene_id]["instance_bboxes"]
-         # GT BBOXES = instance_bboxes
-        # for instance_bboxes 3detr takes 7 dimensional input, we take 8 dimensional
-        # ok
+        instance_bboxes = self.scene_data[scene_id]["instance_bboxes"] # GT BBOXES
+
         if not self.use_color:
-            point_cloud = mesh_vertices[:,0:3] # do not use color for now
+            point_cloud = mesh_vertices[:,0:3]
             pcl_color = mesh_vertices[:,3:6]
         else:
             point_cloud = mesh_vertices[:,0:6] 
             point_cloud[:,3:6] = (point_cloud[:,3:6]-MEAN_COLOR_RGB)/256.0
             pcl_color = point_cloud[:,3:6]
-        # Not an option in 3detr
+
         if self.use_normal:
             normals = mesh_vertices[:,6:9]
             point_cloud = np.concatenate([point_cloud, normals],1)
-        # Not an option in 3detr
+
         if self.use_multiview:
             # load multiview database
             pid = mp.current_process().pid
@@ -372,12 +362,11 @@ class ScannetReferenceDataset(ReferenceDataset):
 
             multiview = self.multiview_data[pid][scene_id]
             point_cloud = np.concatenate([point_cloud, multiview],1)
-        # ok
+
         if self.use_height:
             floor_height = np.percentile(point_cloud[:,2],0.99)
             height = point_cloud[:,2] - floor_height
-            point_cloud = np.concatenate([point_cloud, np.expand_dims(height, 1)],1) 
-
+            point_cloud = np.concatenate([point_cloud, np.expand_dims(height, 1)],1)
 
         point_cloud, choices = random_sampling(point_cloud, self.num_points, return_choices=True)        
         instance_labels = instance_labels[choices]
@@ -385,16 +374,13 @@ class ScannetReferenceDataset(ReferenceDataset):
         pcl_color = pcl_color[choices]
         
         # ------------------------------- LABELS ------------------------------
-
-        ## ok
         target_bboxes = np.zeros((MAX_NUM_OBJ, 6))
         target_bboxes_mask = np.zeros((MAX_NUM_OBJ), dtype=np.float32)
         angle_classes = np.zeros((MAX_NUM_OBJ,), dtype=np.int64)
         angle_residuals = np.zeros((MAX_NUM_OBJ,))
-        ## / ok
 
-        raw_sizes = np.zeros((MAX_NUM_OBJ, 3), dtype=np.float32) #size_residuals
-        raw_angles = np.zeros((MAX_NUM_OBJ,), dtype=np.float32) #size_classes?
+        raw_sizes = np.zeros((MAX_NUM_OBJ, 3), dtype=np.float32)
+        raw_angles = np.zeros((MAX_NUM_OBJ,), dtype=np.float32)
 
         if self.augment and self.use_random_cuboid:
             (
@@ -407,12 +393,7 @@ class ScannetReferenceDataset(ReferenceDataset):
             instance_labels = per_point_labels[0]
             semantic_labels = per_point_labels[1]
 
-        num_bbox = 1
-        #point_votes = np.zeros([self.num_points, 3])
-        #point_votes_mask = np.zeros(self.num_points)
         num_bbox = instance_bboxes.shape[0] if instance_bboxes.shape[0] < MAX_NUM_OBJ else MAX_NUM_OBJ
-        # target_bboxes_mask[0:num_bbox] = 1
-        # target_bboxes[0:num_bbox,:] = instance_bboxes[:MAX_NUM_OBJ,0:6]
         target_bboxes_mask[0 : instance_bboxes.shape[0]] = 1
         target_bboxes[0 : instance_bboxes.shape[0], :] = instance_bboxes[:, 0:6]
         # ------------------------------- DATA AUGMENTATION ------------------------------        
@@ -481,7 +462,7 @@ class ScannetReferenceDataset(ReferenceDataset):
         target_object_ids = np.zeros((MAX_NUM_OBJ,)) # object ids of all objects
         try:
             target_bboxes_semcls[0:num_bbox] = [DC.nyu40id2class[int(x)] for x in instance_bboxes[:,-2][0:num_bbox]]
-            target_object_ids[0:num_bbox] = instance_bboxes[:, -1][0:num_bbox] # 3detr doesn't use object id's.
+            target_object_ids[0:num_bbox] = instance_bboxes[:, -1][0:num_bbox]
         except KeyError:
             pass
 
@@ -489,7 +470,8 @@ class ScannetReferenceDataset(ReferenceDataset):
 
         # object rotations
         scene_object_rotations = np.zeros((MAX_NUM_OBJ, 3, 3))
-        scene_object_rotation_masks = np.zeros((MAX_NUM_OBJ,)) # NOTE this is not object mask!!!
+        scene_object_rotation_masks = np.zeros((MAX_NUM_OBJ,))
+
         # if scene is not in scan2cad annotations, skip
         # if the instance is not in scan2cad annotations, skip
         if self.scan2cad_rotation and scene_id in self.scan2cad_rotation:
@@ -503,17 +485,9 @@ class ScannetReferenceDataset(ReferenceDataset):
                     pass
 
         # ------------------------------- Caption module ------------------------------
-        # caption module complained about data_dict["ref_box_corner_label"]. it was deleted now i build it back:
         size_classes = np.zeros((MAX_NUM_OBJ,))
         size_residuals = np.zeros((MAX_NUM_OBJ, 3))
-
-        ref_box_label = np.zeros(MAX_NUM_OBJ)
         ref_box_label = np.zeros(MAX_NUM_OBJ) # bbox label for reference target
-        ref_center_label = np.zeros(3) # bbox center for reference target
-        ref_heading_class_label = 0
-        ref_heading_residual_label = 0
-        ref_size_class_label = 0
-        ref_size_residual_label = np.zeros(3) # bbox size residual for reference target
         ref_box_corner_label = np.zeros((8, 3))
 
         class_ind = [DC.nyu40id2class[int(x)] for x in instance_bboxes[:num_bbox,-2]]
@@ -570,8 +544,7 @@ class ScannetReferenceDataset(ReferenceDataset):
         data_dict["ann_id"] = np.array(int(ann_id)).astype(np.int64)
         data_dict["object_cat"] = np.array(object_cat).astype(np.int64)
         data_dict["unique_multiple"] = np.array(self.unique_multiple_lookup[scene_id][str(object_id)][ann_id]).astype(np.int64)
-        # The following are the original bbox calculations. 3DETR ones are flipped.
-        # TODO: box3d_iou_batch_tensor() works well if the boxes are from the same dataset. extract ref_box_corner_label from 3detr as well. Do coordinate flipping only for plotting the results.
+        # BBox data for captioning module
         data_dict["ref_box_corner_label"] = ref_box_corner_label.astype(np.float64) # target box corners NOTE type must be double
         data_dict["gt_box_corner_label"] = gt_box_corner_label.astype(np.float64) # all GT box corners NOTE type must be double
         ## 3DETR
@@ -579,16 +552,10 @@ class ScannetReferenceDataset(ReferenceDataset):
         data_dict["point_cloud_dims_max"] = point_cloud_dims_max.astype(np.float32)
         data_dict["gt_box_present"] = data_dict["box_label_mask"]
         data_dict["gt_box_sem_cls_label"] =  data_dict["sem_cls_label"]
-
         data_dict["gt_box_sem_cls_label"] = target_bboxes_semcls.astype(np.int64)
         data_dict["pcl_color"] = pcl_color
-        # 3DETR BBOX'es.
         data_dict["gt_box_corners"] = box_corners.astype(np.float32)
         data_dict["gt_box_centers"] = box_centers.astype(np.float32)
-        # Just using S2C gt_boxes doesn't work.
-        # data_dict["gt_box_corners"] = data_dict["gt_box_corner_label"]
-        # data_dict["gt_box_centers"] = data_dict["center_label"]
-
         data_dict["gt_box_centers_normalized"] = box_centers_normalized.astype(
             np.float32
         )

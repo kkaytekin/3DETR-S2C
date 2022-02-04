@@ -22,13 +22,11 @@ from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.dataset import ScannetReferenceDataset
 from lib.solver import Solver
 from lib.config import CONF
-from models.capnet import CapNet
-from scripts.eval_pretrained import SCANREFER_TRAIN
+from models.tridetrS2c import TridetrS2c
 from tridetr.models.model_3detr import build_3detr
 from tridetr.criterion import build_criterion
 
-# SCANREFER_DUMMY = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_dummy.json")))
-
+SCANREFER_TRAIN = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
 # extracted ScanNet object rotations from Scan2CAD 
 # NOTE some scenes are missing in this annotation!!!
 SCAN2CAD_ROTATION = json.load(open(os.path.join(CONF.PATH.SCAN2CAD, "scannet_instance_rotations.json")))
@@ -43,35 +41,37 @@ def get_dataloader(args, scanrefer, all_scene_list, split, config, augment, scan
         split=split, 
         name=args.dataset,
         num_points=args.num_points, 
-        use_height=(not args.no_height),
-        use_color=args.use_color, 
-        use_normal=args.use_normal, 
+        use_height=False,
+        use_color=False,
+        use_normal=False,
         use_multiview=args.use_multiview,
         augment=augment,
         scan2cad_rotation=scan2cad_rotation
     )
-    # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
     return dataset, dataloader
 
 def get_model(args, dataset, device):
     # initiate model
-    # todo: get rid of input_channels here. we do it in build_encoder already. for pretrained version; we cannot use normal, height and color.
-    input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
+    if True in [args.use_normal, args.use_color, (not args.no_height)]:
+        raise AssertionError("Invalid call arguments. Pretrained model cannot use normal, color or height information!")
+
     tridetr , _ = build_3detr(args, dataset_config=DC)
+    #Load pretrained 3DETR
     if not args.use_checkpoint:
-        # TODO: Clear before sending code
-        #sd = torch.load(os.path.join(CONF.PATH.DATA,"tridetr_checkpoints","scannet_masked_ep1080.pth"))
-        #local version
-        sd = torch.load("/home/kagan/adl4cv/Scan2Cap3detr/data/tridetr_checkpoints/scannet_masked_ep1080.pth")
-        # add initialized bbox_feature layer
+        if args.enc_type == "masked":
+            sd = torch.load(os.path.join(CONF.PATH.PRETRAINED,"scannet_masked_ep1080.pth"))
+        else:
+            sd = torch.load(os.path.join(CONF.PATH.PRETRAINED,"scannet_ep1080.pth"))
+        # add extra bbox_feature layers to state dictionary
         for k, v in tridetr.state_dict().items():
             if "mlp_heads.bbox_feature" in k:
                 sd["model"][k] = v
         tridetr.load_state_dict(sd["model"])
 
-    model = CapNet(
+    model = TridetrS2c(
         num_class=DC.num_class,
         vocabulary=dataset.vocabulary,
         embeddings=dataset.glove,
@@ -79,7 +79,6 @@ def get_model(args, dataset, device):
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
         tridetrmodel=tridetr,
-        input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
         no_caption=args.no_caption,
         use_topdown=args.use_topdown,
@@ -90,54 +89,14 @@ def get_model(args, dataset, device):
         use_relation=args.use_relation,
         use_orientation=args.use_orientation,
         use_distance=args.use_distance,
-        use_new=args.use_new
     )
     if not args.unfreeze_3detr:
-        # first freeze all layers in tridetr
+        # first freeze all layers in 3detr
         for param in model.tridetr.parameters():
             param.requires_grad = False
-        # then unfreeze feature extraction layer for captioning
+        # then unfreeze feature extraction layer used in captioning
         for param in model.tridetr.mlp_heads["bbox_feature"].parameters():
             param.requires_grad = True
-    # load pretrained model
-    # print("loading pretrained VoteNet...")
-    # pretrained_model = CapNet(
-    #     num_class=DC.num_class,
-    #     vocabulary=dataset.vocabulary,
-    #     embeddings=dataset.glove,
-    #     num_heading_bin=DC.num_heading_bin,
-    #     num_size_cluster=DC.num_size_cluster,
-    #     mean_size_arr=DC.mean_size_arr,
-    #     num_proposal=args.num_proposals,
-    #     input_feature_dim=input_channels,
-    #     no_caption=True
-    # )
-    #
-    # pretrained_name = "PRETRAIN_VOTENET_XYZ"
-    # if args.use_color: pretrained_name += "_COLOR"
-    # if args.use_multiview: pretrained_name += "_MULTIVIEW"
-    # if args.use_normal: pretrained_name += "_NORMAL"
-    #
-    # pretrained_path = os.path.join(CONF.PATH.PRETRAINED, pretrained_name, "model.pth")
-    # pretrained_model.load_state_dict(torch.load(pretrained_path), strict=False)
-    #
-    # # mount
-    # model.backbone_net = pretrained_model.backbone_net
-    # model.vgen = pretrained_model.vgen
-    # model.proposal = pretrained_model.proposal
-    #
-    # if args.no_detection:
-    #     # freeze pointnet++ backbone
-    #     for param in model.backbone_net.parameters():
-    #         param.requires_grad = False
-    #
-    #     # freeze voting
-    #     for param in model.vgen.parameters():
-    #         param.requires_grad = False
-    #
-    #     # freeze detector
-    #     for param in model.proposal.parameters():
-    #         param.requires_grad = False
     
     # to device
     model.to(device)
@@ -162,8 +121,8 @@ def get_solver(args, dataset, dataloader):
         tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
     else:
         tridetr_criterion = None
-    #Uncomment the following to calculate 3DETR losses. Commented out for faster training.
-    #tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
+        #Uncomment the following to calculate 3DETR losses. Commented out for faster training.
+        #tridetr_criterion = get_tridetr_criterion(args,device,dataset_config=DC)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
     checkpoint_best = None
@@ -366,12 +325,12 @@ if __name__ == "__main__":
     
     parser.add_argument("--criterion", type=str, default="cider", \
         help="criterion for selecting the best model [choices: bleu-1, bleu-2, bleu-3, bleu-4, cider, rouge, meteor, sum]")
-    
+
+    parser.add_argument("--no_height", action="store_true", help="Do NOT use height signal in input.")
     parser.add_argument("--query_mode", type=str, default="center", help="Mode for querying the local context, [choices: center, corner]")
     parser.add_argument("--graph_mode", type=str, default="edge_conv", help="Mode for querying the local context, [choices: graph_conv, edge_conv]")
     parser.add_argument("--graph_aggr", type=str, default="add", help="Mode for aggregating features, [choices: add, mean, max]")
-    
-    parser.add_argument("--no_height", action="store_true", help="Do NOT use height signal in input.")
+
     parser.add_argument("--no_augment", action="store_true", help="Do NOT use height signal in input.")
     parser.add_argument("--no_detection", action="store_true", help="Do NOT train the detection module.")
     parser.add_argument("--no_caption", action="store_true", help="Do NOT train the caption module.")
@@ -382,17 +341,12 @@ if __name__ == "__main__":
     parser.add_argument("--use_multiview", action="store_true", help="Use multiview images.")
     parser.add_argument("--use_topdown", action="store_true", help="Use top-down attention for captioning.")
     parser.add_argument("--use_relation", action="store_true", help="Use object-to-object relation in graph.")
-    parser.add_argument("--use_new", action="store_true", help="Use new Top-down module.")
     parser.add_argument("--use_orientation", action="store_true", help="Use object-to-object orientation loss in graph.")
     parser.add_argument("--use_distance", action="store_true", help="Use object-to-object distance loss in graph.")
-    parser.add_argument("--use_pretrained", type=str, help="Specify the folder name containing the pretrained detection module.")
     parser.add_argument("--use_checkpoint", type=str, help="Specify the checkpoint root", default="")
     
     parser.add_argument("--debug", action="store_true", help="Debug mode.")
     # --------- 3DETR Arguments ---------
-    # TODO: Determine what to parse,
-    #   *which ones affect datalooader & preprocessing,
-    #   *which ones affect the rest?
     ### Encoder
     parser.add_argument(
         "--enc_type", default="vanilla", choices=["masked", "maskedv2", "vanilla"]
@@ -427,8 +381,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
     )
-    #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
-    #parser.add_argument("--use_color", default=False, action="store_true")
 
     ##### Set Loss #####
     ### Matcher

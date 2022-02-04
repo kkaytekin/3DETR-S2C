@@ -8,7 +8,6 @@ import os
 
 sys.path.append(os.path.join(os.getcwd(), os.pardir, "lib")) # HACK add the lib folder
 from lib.config import CONF
-from utils.box_util import get_3d_box
 #3detr
 from utils.box_util import (flip_axis_to_camera_np, flip_axis_to_camera_tensor,
                             get_3d_box_batch_np, get_3d_box_batch_tensor)
@@ -92,8 +91,8 @@ class ScannetDatasetConfig(object):
         self.nyu40id2class = self._get_nyu40id2class()
         self.mean_size_arr = np.load(os.path.join(CONF.PATH.SCANNET, 'meta_data/scannet_reference_means.npz'))['arr_0']
 
-        self.num_class = len(self.type2class.keys()) #num_semcls in 3detr
-        self.num_heading_bin = 1 #num_angle_bin in 3detr
+        self.num_class = len(self.type2class.keys()) # num_semcls in 3detr
+        self.num_heading_bin = 1 # num_angle_bin in 3detr
         self.num_size_cluster = len(self.type2class.keys())
 
         self.type_mean_size = {}
@@ -126,7 +125,6 @@ class ScannetDatasetConfig(object):
             return is class of int32 of 0,1,...,N-1 and a number such that
                 class*(2pi/N) + number = angle
 
-            NOT USED.
         '''
         assert(False)
     
@@ -175,7 +173,6 @@ class ScannetDatasetConfig(object):
         return obb
 
     #3DETR
-    # flip_axis_to_camera is making everything flipped. why should it even help?
     def box_parametrization_to_corners(self, box_center_unnorm, box_size, box_angle):
         box_center_upright = flip_axis_to_camera_tensor(box_center_unnorm)
         boxes = get_3d_box_batch_tensor(box_size, box_angle, box_center_upright)

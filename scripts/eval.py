@@ -16,25 +16,17 @@ from torch.utils.data import DataLoader
 
 sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
 
-import lib.capeval.bleu.bleu as capblue
-import lib.capeval.cider.cider as capcider
-import lib.capeval.rouge.rouge as caprouge
-
 from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.dataset import ScannetReferenceDataset
 from lib.config import CONF
 from lib.loss_helper import get_detr_and_cap_loss
-from models.capnet import CapNet
+from models.tridetrS2c import TridetrS2c
 from lib.eval_helper import eval_cap
 
 from tridetr.models.model_3detr import build_3detr
 from tridetr.criterion import build_criterion
 from tridetr.utils.ap_calculator import APCalculator
 from tridetr.utils.dist import all_gather_dict
-
-# SCANREFER_TRAIN = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
-# SCANREFER_VAL = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_val.json")))
-# SCANREFER_DUMMY = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_dummy.json")))
 
 # constants
 DC = ScannetDatasetConfig()
@@ -52,26 +44,21 @@ def get_dataloader(args, scanrefer, all_scene_list, config):
         use_multiview=args.use_multiview,
         augment=False
     )
-    # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
     return dataset, dataloader
 
-def get_model(args, dataset, device, root=CONF.PATH.OUTPUT, eval_pretrained=False):
+def get_model(args, dataset, device, root=CONF.PATH.OUTPUT):
     # initiate model
-    input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
     tridetr , _ = build_3detr(args, dataset_config=DC)
-    model = CapNet(
+    model = TridetrS2c(
         num_class=DC.num_class,
         vocabulary=dataset.vocabulary,
         embeddings=dataset.glove,
         num_heading_bin=DC.num_heading_bin,
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
-
         tridetrmodel=tridetr,
-
-        input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
         no_caption=not args.eval_caption,
         use_topdown=args.use_topdown,
@@ -97,9 +84,7 @@ def get_model(args, dataset, device, root=CONF.PATH.OUTPUT, eval_pretrained=Fals
     return model
 
 def get_scannet_scene_list(data):
-    # scene_list = sorted([line.rstrip() for line in open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_{}.txt".format(split)))])
     scene_list = sorted(list(set([d["scene_id"] for d in data])))
-
     return scene_list
 
 def get_eval_data(args):
@@ -179,8 +164,8 @@ def eval_detection(args):
     # model
     print("initializing...")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # root = CONF.PATH.PRETRAINED if args.eval_pretrained else CONF.PATH.OUTPUT
-    model = get_model(args, dataset, device, eval_pretrained=args.eval_pretrained)
+
+    model = get_model(args, dataset, device)
 
     # config
     POST_DICT = {
@@ -190,9 +175,9 @@ def eval_detection(args):
         "use_old_type_nms": False,
         "cls_nms": True,
         "per_class_proposal": True,
-        "use_cls_confidence_only": False, # new in 3detr
+        "use_cls_confidence_only": False,
         "conf_thresh": 0.05,
-        "no_nms": False, # new in 3detr
+        "no_nms": False,
         "dataset_config": DC
     }
     ap_calculator = APCalculator(
@@ -224,7 +209,7 @@ def eval_detection(args):
         ap_calculator.step_meter(outputs, batch_gt_map)
     metrics = ap_calculator.compute_metrics()
     metric_str = ap_calculator.metrics_to_str(metrics)
-        #Print the results
+    # Print the results
     print("==" * 10)
     print(f"Test model; Metrics {metric_str}")
     print("==" * 10)
@@ -273,7 +258,6 @@ if __name__ == "__main__":
     
     parser.add_argument("--eval_caption", action="store_true", help="evaluate the reference localization results")
     parser.add_argument("--eval_detection", action="store_true", help="evaluate the object detection results")
-    parser.add_argument("--eval_pretrained", action="store_true", help="evaluate the pretrained object detection results")
     
     parser.add_argument("--force", action="store_true", help="generate the results by force")
     parser.add_argument("--save_interm", action="store_true", help="Save the intermediate results")
@@ -313,8 +297,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
     )
-    #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
-    #parser.add_argument("--use_color", default=False, action="store_true")
 
     ##### Set Loss #####
     ### Matcher
