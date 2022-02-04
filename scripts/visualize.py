@@ -5,7 +5,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 import os
 import sys
 import json
-import h5py
 import torch
 import argparse
 
@@ -14,29 +13,25 @@ import numpy as np
 from tqdm import tqdm
 from copy import deepcopy
 from torch.utils.data import DataLoader
-from plyfile import PlyData, PlyElement
 from shutil import copyfile
 
-sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
+from utils.box_util import rotate_preds
 
-import lib.capeval.bleu.bleu as capblue
-import lib.capeval.cider.cider as capcider
-import lib.capeval.rouge.rouge as caprouge
+sys.path.append(os.path.join(os.getcwd())) # HACK add the root folder
 
 from data.scannet.model_util_scannet import ScannetDatasetConfig
 from lib.dataset import ScannetReferenceDataset
 from lib.config import CONF
-from lib.ap_helper import APCalculator, parse_predictions, parse_groundtruths
-from lib.loss_helper import get_scene_cap_loss
+from lib.loss_helper import get_detr_and_cap_loss
 from models.capnet import CapNet
-from lib.eval_helper import eval_cap
 from scripts.colors import COLORS
 
 from tridetr.models.model_3detr import build_3detr
+from tridetr.criterion import build_criterion
+from tridetr.utils.ap_calculator import parse_predictions
 
 SCANNET_MESH = os.path.join(CONF.PATH.AXIS_ALIGNED_MESH, "{}", "axis_aligned_scene.ply")
 SCANNET_AGGR = os.path.join(CONF.PATH.SCANNET_SCANS, "{}/{}_vh_clean.aggregation.json") # scene_id, scene_id
-#SCANNET_AGGR = os.path.join(CONF.PATH.SCANNET_SCANS, "{}/{}_vh_clean.aggregation.json") # scene_id, scene_id
 
 SCANREFER_TRAIN = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_train.json")))
 SCANREFER_VAL = json.load(open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_val.json")))
@@ -56,12 +51,12 @@ def get_dataloader(args, scanrefer, all_scene_list, config):
         use_multiview=args.use_multiview,
         augment=False
     )
-    # dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
     return dataset, dataloader
 
-def get_model(args, dataset, root=CONF.PATH.OUTPUT):
+def get_model(args, dataset,device, root=CONF.PATH.OUTPUT):
     # initiate model
     input_channels = int(args.use_multiview) * 128 + int(args.use_normal) * 3 + int(args.use_color) * 3 + int(not args.no_height)
     tridetr , _ = build_3detr(args, dataset_config=DC)
@@ -72,9 +67,7 @@ def get_model(args, dataset, root=CONF.PATH.OUTPUT):
         num_heading_bin=DC.num_heading_bin,
         num_size_cluster=DC.num_size_cluster,
         mean_size_arr=DC.mean_size_arr,
-
         tridetrmodel=tridetr,
-
         input_feature_dim=input_channels,
         num_proposal=args.num_proposals,
         no_caption=args.no_caption,
@@ -93,15 +86,19 @@ def get_model(args, dataset, root=CONF.PATH.OUTPUT):
     model_name = "model_last.pth" if args.use_last else "model.pth"
     model_path = os.path.join(root, args.folder, model_name)
     model.load_state_dict(torch.load(model_path), strict=False)
-    # model.load_state_dict(torch.load(model_path))
 
     # to device
-    model.cuda()
+    model.to(device)
 
     # set mode
     model.eval()
 
     return model
+
+def get_tridetr_criterion(args, device, dataset_config):
+    tridetr_criterion = build_criterion(args, dataset_config)
+    tridetr_criterion.to(device)
+    return tridetr_criterion
 
 def get_scannet_scene_list(split):
     scene_list = sorted([line.rstrip() for line in open(os.path.join(CONF.PATH.DATA, "ScanRefer_filtered_{}.txt".format(split)))])
@@ -292,7 +289,8 @@ def visualize(args):
     dataset, dataloader = get_dataloader(args, scanrefer_eval, eval_scene_list, DC)
 
     # get model
-    model = get_model(args, dataset)
+    model = get_model(args, dataset, device)
+    tridetrcriterion = get_tridetr_criterion(args, device, DC)
 
     object_id_to_object_name = {}
     for scene_id in eval_scene_list:
@@ -315,7 +313,8 @@ def visualize(args):
 
         with torch.no_grad():
             data_dict = model(data_dict, use_tf=False, is_eval=True)
-            data_dict = get_scene_cap_loss(data_dict, device, DC, weights=dataset.weights, detection=True, caption=False)
+            data_dict = get_detr_and_cap_loss(data_dict, device, DC, weights=dataset.weights,
+                                              tridetrcriterion = tridetrcriterion, detection=True, caption=False)
 
         # unpack
         captions = data_dict["lang_cap"].argmax(-1) # batch_size, num_proposals, max_len - 1
@@ -340,7 +339,7 @@ def visualize(args):
         nms_masks = torch.LongTensor(data_dict["pred_mask"]).cuda()
 
         # objectness mask
-        obj_masks = torch.argmax(data_dict["objectness_scores"], 2).long()
+        obj_masks = data_dict["bbox_mask"]
 
         # final mask
         nms_masks = nms_masks * obj_masks
@@ -350,7 +349,6 @@ def visualize(args):
 
         # bbox corners
         detected_bbox_corners = data_dict["bbox_corner"] # batch_size, num_proposals, 8, 3
-        detected_bbox_centers = data_dict["center"] # batch_size, num_proposals, 3
 
         for batch_id in range(batch_size):
             dataset_idx = dataset_ids[batch_id].item()
@@ -384,8 +382,9 @@ def visualize(args):
 
                         palette_idx = int(object_id) % len(COLORS)
                         color = COLORS[palette_idx]
+                        detected_bbox_corner = rotate_preds(detected_bbox_corner)
                         write_bbox(detected_bbox_corner, color, ply_path)
-                        
+
                     except KeyError:
                         continue
 
@@ -394,23 +393,23 @@ def visualize(args):
             with open(pred_path, "w") as f:
                 json.dump(candidates, f, indent=4)
 
-            # TODO: Learn to print GT bboxes
-            # gt_object_ids = VOTENET_DATABASE["0|{}_gt_ids".format(scene_id)]
-            # gt_object_ids = np.array(gt_object_ids)
-            #
-            # gt_bbox_corners = VOTENET_DATABASE["0|{}_gt_corners".format(scene_id)]
-            # gt_bbox_corners = np.array(gt_bbox_corners)
-            #
-            # for i, object_id in enumerate(gt_object_ids):
-            #     object_id = str(int(object_id))
-            #     object_name = object_id_to_object_name[scene_id][object_id]
-            #
-            #     ply_name = "gt-{}-{}.ply".format(object_id, object_name)
-            #     ply_path = os.path.join(scene_root, ply_name)
-            #
-            #     palette_idx = int(object_id) % len(COLORS)
-            #     color = COLORS[palette_idx]
-            #     write_bbox(gt_bbox_corners[i], color, ply_path)
+            # Write GT bounding boxes
+            gt_object_ids = data_dict["scene_object_ids"][batch_id].detach().cpu().numpy()
+
+            gt_bbox_corners = data_dict["gt_box_corner_label"][batch_id].detach().cpu().numpy()
+
+            for i, object_id in enumerate(gt_object_ids):
+                if object_id == 0:
+                    continue
+                else:
+                    object_id = str(int(object_id))
+                    object_name = object_id_to_object_name[scene_id][object_id]
+
+                    ply_name = "gt-{}-{}.ply".format(object_id, object_name)
+                    ply_path = os.path.join(scene_root, ply_name)
+
+                    gt_color = [255,255,255] # White for GT bbox'es
+                    write_bbox(gt_bbox_corners[i], gt_color, ply_path)
 
     print("done!")
 
@@ -431,7 +430,6 @@ if __name__ == "__main__":
     parser.add_argument("--graph_aggr", type=str, default="add", help="Mode for aggregating features, [choices: add, mean, max]")
     parser.add_argument("--no_height", action="store_true", help="Do NOT use height signal in input.")
 
-    # TODO: currently using the call the train capnet, change that to eval capnet. the following values are not needed.
     parser.add_argument("--no_caption", action="store_true", help="Do NOT train the caption module.")
     parser.add_argument("--use_orientation", action="store_true", help="Use object-to-object orientation loss in graph.")
     parser.add_argument("--use_new", action="store_true", help="Use new Top-down module.")
@@ -446,9 +444,6 @@ if __name__ == "__main__":
     parser.add_argument("--use_relation", action="store_true", help="Use object-to-object relation in graph.")
     parser.add_argument("--use_distance", action="store_true", help="Use object-to-object distance loss in graph.")
     # -------------------- 3DETR ARGS -------------------------
-        # TODO: Determine what to parse,
-    #   *which ones affect datalooader & preprocessing,
-    #   *which ones affect the rest?
     ### Encoder
     parser.add_argument(
         "--enc_type", default="vanilla", choices=["masked", "maskedv2", "vanilla"]
@@ -469,22 +464,32 @@ if __name__ == "__main__":
     parser.add_argument("--dec_dropout", default=0.1, type=float)
     parser.add_argument("--dec_nhead", default=4, type=int)
 
-    # ### MLP heads for predicting bounding boxes
-    # parser.add_argument("--mlp_dropout", default=0.3, type=float)
-    # parser.add_argument(
-    #     "--nsemcls",
-    #     default=-1,
-    #     type=int,
-    #     help="Number of semantic object classes. Can be inferred from dataset",
-    # )
+    ### MLP heads for predicting bounding boxes
+    parser.add_argument("--mlp_dropout", default=0.0, type=float)
 
     ### Other model params
     parser.add_argument("--preenc_npoints", default=2048, type=int)
     parser.add_argument(
         "--pos_embed", default="fourier", type=str, choices=["fourier", "sine"]
     )
-    #parser.add_argument("--nqueries", default=256, type=int) #nqueries = num_proposals
-    #parser.add_argument("--use_color", default=False, action="store_true")
+
+    ##### Set Loss #####
+    ### Matcher
+    parser.add_argument("--matcher_giou_cost", default=2, type=float)
+    parser.add_argument("--matcher_cls_cost", default=1, type=float)
+    parser.add_argument("--matcher_center_cost", default=0, type=float)
+    parser.add_argument("--matcher_objectness_cost", default=0, type=float)
+
+    ### Loss Weights
+    parser.add_argument("--loss_giou_weight", default=0, type=float)
+    parser.add_argument("--loss_sem_cls_weight", default=1, type=float)
+    parser.add_argument(
+        "--loss_no_object_weight", default=0.2, type=float
+    )  # "no object" or "background" class for detection
+    parser.add_argument("--loss_angle_cls_weight", default=0.1, type=float)
+    parser.add_argument("--loss_angle_reg_weight", default=0.5, type=float)
+    parser.add_argument("--loss_center_weight", default=5.0, type=float)
+    parser.add_argument("--loss_size_weight", default=1.0, type=float)
 
     args = parser.parse_args()
 

@@ -516,7 +516,10 @@ def rotate_preds(pred_bbox):
 
     # So i used the following, which gives the same iou vales but the first four elements
     # in y axis are the ones in the last 4 axis.
-    out = pred_bbox.clone()
+    if type(pred_bbox) == np.ndarray:
+        out = np.copy(pred_bbox)
+    else:
+        out = pred_bbox.clone()
     out[...,[0,1,2]] = out[...,[0,2,1]]
     out[..., 2] *= -1
 
