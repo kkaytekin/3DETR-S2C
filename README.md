@@ -32,3 +32,10 @@ python scripts/train_pretrained3detr.py [--unfreeze_3detr] [--enc_type masked] -
 python scripts/eval.py --folder <folder containing the model> --eval_caption --min_iou [0.25 or 0.50] [--eval_detection] [--enc_type masked] --no_height --enc_dropout 0 --use_topdown --num_proposals 256 --num_locals 10 --use_relation --num_graph_steps 2
 ```
 
+
+# License
+Scan2Cap is licensed under a Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
+
+The majority of 3DETR is licensed under the Apache 2.0 license.
+
+Please refer to [Scan2Cap](https://github.com/daveredrum/Scan2Cap) and [3DETR](https://github.com/facebookresearch/3detr) for licensing.
