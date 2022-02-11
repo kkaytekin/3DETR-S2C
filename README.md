@@ -1,5 +1,7 @@
 # 3DETR-S2C
+<p align="center"><img src="docs/Poster.jpg" width="600px"/></p>
 
+S2C-MMT can be found [here](https://github.com/antoniooroz/scan2cap-mmt)
 ### Instructions
 
 Before running our code, the environment preperation and data installation steps provided in <a href="https://github.com/daveredrum/Scan2Cap">Scan2Cap</a> and <a href="https://github.com/facebookresearch/3detr">3DETR</a> repositories must be completed.
