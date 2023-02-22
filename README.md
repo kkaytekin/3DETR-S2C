@@ -1,6 +1,5 @@
 # 3DETR-S2C
 <p align="center"><img src="docs/Poster.jpg"/></p>
-[Final Report](Report.pdf)
 
 S2C-MMT can be found [here](https://github.com/antoniooroz/scan2cap-mmt)
 ### Instructions
