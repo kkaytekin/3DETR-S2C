@@ -4,9 +4,9 @@
 - [Report](docs/Report.pdf)
 - [First Presentation](docs/1st_Presentation.pdf)
 - [Second Presentation](docs/2nd_Presentation.pdf)
+- The second architecture, S2C-MMT can be found [here](https://github.com/antoniooroz/scan2cap-mmt)
 
 
-S2C-MMT can be found [here](https://github.com/antoniooroz/scan2cap-mmt)
 ### Instructions
 
 Before running our code, the environment preperation and data installation steps provided in <a href="https://github.com/daveredrum/Scan2Cap">Scan2Cap</a> and <a href="https://github.com/facebookresearch/3detr">3DETR</a> repositories must be completed.
