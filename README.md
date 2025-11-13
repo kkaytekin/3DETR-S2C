@@ -1,7 +1,10 @@
 # 3DETR-S2C
 <p align="center"><img src="docs/Poster.jpg"/></p>
 
-Final report can be found [here](Report.pdf)
+- [Report](docs/Report.pdf)
+- [First Presentation](docs/1st_Presentation.pdf)
+- [Second Presentation](docs/2nd_Presentation.pdf)
+
 
 S2C-MMT can be found [here](https://github.com/antoniooroz/scan2cap-mmt)
 ### Instructions
